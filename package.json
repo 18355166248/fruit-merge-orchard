@@ -7,7 +7,7 @@
     "check:runtime": "node scripts/check-mobile-runtime.mjs",
     "update:runtime-lock": "node scripts/update-mobile-runtime-lock.mjs",
     "test:runtime": "playwright test tests/mobile-runtime.spec.ts",
-    "test:gameplay": "playwright test tests/gameplay.spec.ts",
+    "test:gameplay": "playwright test tests/game-rules.spec.ts tests/gameplay.spec.ts",
     "test:browser": "playwright test",
     "test:sites": "node --test tests/sites-worker.test.mjs",
     "predev": "npm run check:runtime",

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import * as Phaser from "phaser";
 import { MobileScroll } from "./mobile";
+import { calculateMergeReward, COMBO_WINDOW_MS } from "./gameRules";
 import "./prototype.css";
 
 const FRUIT_COUNT = 11;
@@ -25,6 +26,11 @@ type GameBridge = {
 
 type FeedbackKind = "drop" | "merge" | "game-over";
 
+type ComboState = {
+  count: number;
+  multiplier: number;
+};
+
 type OrchardGameProps = {
   onScore: (score: number) => void;
   onNext: (level: number) => void;
@@ -33,6 +39,7 @@ type OrchardGameProps = {
   onDanger: (active: boolean) => void;
   onGameOver: (score: number) => void;
   onFeedback: (kind: FeedbackKind, level?: number) => void;
+  onCombo: (combo: ComboState) => void;
   paused: boolean;
 };
 
@@ -48,7 +55,7 @@ type PendingMerge = {
   velocityY: number;
 };
 
-function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, onFeedback, paused }: OrchardGameProps) {
+function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, onFeedback, onCombo, paused }: OrchardGameProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const bridgeRef = useRef<GameBridge | null>(null);
 
@@ -63,7 +70,11 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
     let isGameOver = false;
     let mergeFlushScheduled = false;
     let dangerActive = false;
+    let comboCount = 0;
+    let lastMergeAt = Number.NEGATIVE_INFINITY;
+    let comboResetEvent: Phaser.Time.TimerEvent | null = null;
     let guide: Phaser.GameObjects.Graphics;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const merging = new Set<number>();
     const pendingMerges: PendingMerge[] = [];
     const overflowSince = new Map<number, number>();
@@ -128,6 +139,9 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
           setPaused: (value) => {
             this.matter.world.enabled = !value;
             this.input.enabled = !value;
+            // 暂停时冻结连击窗口和反馈动画，恢复后仍延续玩家暂停前的局面。
+            this.time.paused = value;
+            this.tweens.paused = value;
           },
           nudge: (direction) => {
             if (isGameOver || !this.input.enabled) return;
@@ -180,6 +194,65 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
         return fruit;
       }
 
+      playMergeEffect(x: number, y: number, level: number, points: number, multiplier: number) {
+        const safeLevel = Math.min(level, FRUIT_COUNT - 1);
+        const scoreText = this.add.text(x, y - 4, `+${points}${multiplier > 1 ? `  x${multiplier}` : ""}`, {
+          color: "#fff5c9",
+          fontFamily: "Georgia, serif",
+          fontSize: multiplier > 1 ? "21px" : "18px",
+          fontStyle: "bold",
+          stroke: "#a84213",
+          strokeThickness: 4,
+        }).setOrigin(0.5).setDepth(8);
+
+        if (reduceMotion) {
+          this.time.delayedCall(260, () => scoreText.destroy());
+          return;
+        }
+
+        // 碎光复用真实水果贴图且不创建 Matter body，视觉反馈不会改变堆叠结构。
+        for (let index = 0; index < 7; index += 1) {
+          const angle = (Math.PI * 2 * index) / 7 - Math.PI / 2;
+          const distance = 24 + (index % 3) * 7;
+          const sparkle = this.add.image(x, y, `fruit-${safeLevel}`).setDisplaySize(11, 11).setAlpha(0.82).setDepth(7);
+          this.tweens.add({
+            targets: sparkle,
+            x: x + Math.cos(angle) * distance,
+            y: y + Math.sin(angle) * distance,
+            alpha: 0,
+            displayWidth: 3,
+            displayHeight: 3,
+            duration: 330,
+            ease: "Cubic.Out",
+            onComplete: () => sparkle.destroy(),
+          });
+        }
+        this.tweens.add({
+          targets: scoreText,
+          y: y - 38,
+          alpha: 0,
+          scale: 1.12,
+          duration: 620,
+          ease: "Cubic.Out",
+          onComplete: () => scoreText.destroy(),
+        });
+        this.cameras.main.shake(80, Math.min(0.0012 + multiplier * 0.00035, 0.0028));
+      }
+
+      registerMerge(basePoints: number) {
+        const elapsed = this.time.now - lastMergeAt;
+        const reward = calculateMergeReward(basePoints, comboCount, elapsed);
+        comboCount = reward.count;
+        lastMergeAt = this.time.now;
+        comboResetEvent?.remove(false);
+        comboResetEvent = this.time.delayedCall(COMBO_WINDOW_MS, () => {
+          comboCount = 0;
+          onCombo({ count: 0, multiplier: 1 });
+        });
+        onCombo({ count: reward.count, multiplier: reward.multiplier });
+        return reward;
+      }
+
       flushMerges() {
         mergeFlushScheduled = false;
         const batch = pendingMerges.splice(0);
@@ -196,14 +269,16 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
           overflowSince.delete(bodyAId);
           overflowSince.delete(bodyBId);
 
+          const basePoints = level >= FRUIT_COUNT - 1 ? MAX_CLEAR_SCORE : SCORES[level + 1];
+          const reward = this.registerMerge(basePoints);
           if (level >= FRUIT_COUNT - 1) {
             // 两枚最高级水果相遇后清场，避免生成不存在的等级并给出明确终局奖励。
-            total += MAX_CLEAR_SCORE;
           } else {
             const resultLevel = level + 1;
             this.spawnFruit(merge.x, merge.y, resultLevel, true, velocityX, velocityY);
-            total += SCORES[resultLevel];
           }
+          total += reward.points;
+          this.playMergeEffect(merge.x, merge.y, level + 1, reward.points, reward.multiplier);
           onScore(total);
           onFeedback("merge", level + 1);
           merging.delete(bodyAId);
@@ -308,7 +383,7 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
       bridgeRef.current = null;
       game.destroy(true);
     };
-  }, [onAim, onCurrent, onDanger, onFeedback, onGameOver, onNext, onScore]);
+  }, [onAim, onCombo, onCurrent, onDanger, onFeedback, onGameOver, onNext, onScore]);
 
   useEffect(() => bridgeRef.current?.setPaused(paused), [paused]);
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -357,6 +432,7 @@ export default function Prototype() {
   const [danger, setDanger] = useState(false);
   const [gameOverScore, setGameOverScore] = useState<number | null>(null);
   const [runId, setRunId] = useState(0);
+  const [combo, setCombo] = useState<ComboState>({ count: 0, multiplier: 1 });
   const mutedRef = useRef(muted);
   const audioContextRef = useRef<AudioContext | null>(null);
   const bestBeforeRunRef = useRef(best);
@@ -418,6 +494,7 @@ export default function Prototype() {
     setDanger(false);
     setGameOverScore(null);
     setPaused(false);
+    setCombo({ count: 0, multiplier: 1 });
     bestBeforeRunRef.current = best;
     setRunId((value) => value + 1);
   };
@@ -450,7 +527,7 @@ export default function Prototype() {
         </section>
 
         <section className="bin-stage">
-          <OrchardGame key={runId} onScore={handleScore} onNext={setNext} onCurrent={setCurrent} onAim={setAimX} onDanger={setDanger} onGameOver={handleGameOver} onFeedback={playFeedback} paused={paused} />
+          <OrchardGame key={runId} onScore={handleScore} onNext={setNext} onCurrent={setCurrent} onAim={setAimX} onDanger={setDanger} onGameOver={handleGameOver} onFeedback={playFeedback} onCombo={setCombo} paused={paused} />
           <img
             className="hanging-fruit"
             data-testid="current-fruit"
@@ -459,6 +536,12 @@ export default function Prototype() {
             alt="当前水果"
           />
           <div className={`danger-line${danger ? " danger-line--active" : ""}`} aria-hidden="true" />
+          {combo.count > 1 && (
+            <div className="combo-banner" data-testid="combo-banner" aria-label={`${combo.count} 连击，${combo.multiplier} 倍得分`}>
+              <span>{combo.count} 连击</span>
+              <strong>x{combo.multiplier}</strong>
+            </div>
+          )}
           <img className="wooden-bin" src="/assets/game/wooden-bin-frame.png" alt="" />
           {paused && <button className="pause-overlay" onClick={() => setPaused(false)}>继续游戏</button>}
           {gameOverScore !== null && (
@@ -473,7 +556,7 @@ export default function Prototype() {
 
         <img className="instruction" src="/assets/game/instruction-plaque.png" alt="松手落下" />
         <p className="game-status" aria-live="polite">
-          {gameOverScore !== null ? `本局结束，得分 ${gameOverScore}` : danger ? "水果接近危险线" : `当前得分 ${score}`}
+          {gameOverScore !== null ? `本局结束，得分 ${gameOverScore}` : danger ? "水果接近危险线" : combo.count > 1 ? `${combo.count} 连击，${combo.multiplier} 倍得分` : `当前得分 ${score}`}
         </p>
       </main>
     </MobileScroll>

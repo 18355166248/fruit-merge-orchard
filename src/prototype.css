@@ -67,6 +67,25 @@
 .wooden-bin { position: absolute; z-index: 5; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
 .danger-line { position: absolute; z-index: 3; left: 22px; right: 22px; top: 61px; height: 4px; border-top: 4px dashed #f04c18; filter: drop-shadow(0 1px 0 #fff2cb); pointer-events: none; }
 .danger-line--active { border-top-color: #d52d12; filter: drop-shadow(0 0 5px #ff3b18); animation: danger-pulse 0.48s ease-in-out infinite alternate; }
+.combo-banner {
+  position: absolute;
+  z-index: 4;
+  top: 79px;
+  right: 28px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px 5px 11px;
+  border: 2px solid #e77b28;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fff7cf 0%, #ffd77d 100%);
+  box-shadow: 0 3px 0 #a8541f55, 0 5px 12px #73360d33;
+  color: #8e3d10;
+  pointer-events: none;
+  animation: combo-pop 180ms ease-out;
+}
+.combo-banner span { font-size: 14px; font-weight: 700; line-height: 1; }
+.combo-banner strong { color: #e6531b; font: 700 18px/1 Georgia, serif; }
 
 .pause-overlay { position: absolute; z-index: 7; left: 50%; top: 46%; transform: translate(-50%, -50%); border: 3px solid #d98c35; border-radius: 18px; padding: 12px 20px; background: #fff0c9; box-shadow: 0 5px 0 #9d551f55; color: #713912; font: 700 19px/1 "STKaiti", serif; }
 .game-over-panel { position: absolute; z-index: 8; left: 50%; top: 46%; transform: translate(-50%, -50%); width: 218px; padding: 23px 20px 19px; display: grid; justify-items: center; gap: 9px; border: 4px solid #d88a31; border-radius: 23px; background: #fff0c9; box-shadow: 0 8px 0 #82421855, 0 15px 30px #51270d40; color: #713912; text-align: center; }
@@ -80,9 +99,10 @@
 button:focus-visible { outline: 3px solid #ef6a28; outline-offset: 2px; }
 
 @keyframes danger-pulse { from { opacity: 0.72; } to { opacity: 1; } }
+@keyframes combo-pop { from { opacity: 0; transform: scale(0.78); } to { opacity: 1; transform: scale(1); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .danger-line--active { animation: none; }
+  .danger-line--active, .combo-banner { animation: none; }
 }
 
 @media (max-height: 900px) {
