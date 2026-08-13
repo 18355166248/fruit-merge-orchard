@@ -18,8 +18,26 @@ async function overlaps(first: Locator, second: Locator) {
 }
 
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    if (!location.search.includes("tutorial=1")) localStorage.setItem("fruit-merge-orchard-tutorial-seen", "true");
+  });
   await page.goto("/");
   await expect(page.getByTestId("orchard-game")).toBeVisible();
+});
+
+test("首次进入会展示渐进式新手引导", async ({ page }) => {
+  await page.evaluate(() => localStorage.removeItem("fruit-merge-orchard-tutorial-seen"));
+  await page.goto("/?tutorial=1");
+  await expect(page.getByRole("dialog", { name: "新手引导" })).toBeVisible();
+  await page.getByRole("button", { name: "开始试玩" }).click();
+  await expect(page.getByRole("status")).toContainText("左右移动");
+  await page.getByRole("button", { name: "查看玩法说明" }).click();
+  await expect(page.getByRole("dialog", { name: "新手引导" })).toBeVisible();
+});
+
+test("页面进入后台时自动暂停且不会自行恢复", async ({ page }) => {
+  await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+  await expect(page.locator(".pause-overlay")).toBeVisible();
 });
 
 test("投放后当前水果按预告队列推进", async ({ page }) => {

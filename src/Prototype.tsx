@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import * as Phaser from "phaser";
 import { MobileScroll } from "./mobile";
-import { calculateMergeReward, COMBO_WINDOW_MS } from "./gameRules";
+import { calculateMergeReward, COMBO_WINDOW_MS, getDifficultyProfile, pickStartLevel } from "./gameRules";
 import "./prototype.css";
 
 const FRUIT_COUNT = 11;
@@ -12,9 +12,9 @@ const WORLD_RIGHT = 327;
 const WORLD_FLOOR = 444;
 const DANGER_Y = 45;
 const SPAWN_PROTECTION_MS = 900;
-const OVERFLOW_GRACE_MS = 1200;
 const MAX_CLEAR_SCORE = 150;
 const BEST_SCORE_KEY = "fruit-merge-orchard-best";
+const TUTORIAL_SEEN_KEY = "fruit-merge-orchard-tutorial-seen";
 const DEFAULT_BEST_SCORE = 8723;
 const fruitUrl = (level: number) => `/assets/game/fruits/fruit-${String(level + 1).padStart(2, "0")}.png`;
 
@@ -40,6 +40,8 @@ type OrchardGameProps = {
   onGameOver: (score: number) => void;
   onFeedback: (kind: FeedbackKind, level?: number) => void;
   onCombo: (combo: ComboState) => void;
+  onPlayerMove: () => void;
+  onPlayerDrop: () => void;
   paused: boolean;
 };
 
@@ -55,7 +57,7 @@ type PendingMerge = {
   velocityY: number;
 };
 
-function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, onFeedback, onCombo, paused }: OrchardGameProps) {
+function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, onFeedback, onCombo, onPlayerMove, onPlayerDrop, paused }: OrchardGameProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const bridgeRef = useRef<GameBridge | null>(null);
 
@@ -101,6 +103,7 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
         this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
           currentX = this.clampX(currentLevel, pointer.x);
           onAim(currentX);
+          if (pointer.isDown) onPlayerMove();
           this.redrawGuide();
         });
         this.input.on("pointerup", () => this.dropFruit());
@@ -287,13 +290,8 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
       }
 
       randomStartLevel() {
-        // 低级水果权重更高，既保留随机性，也避免连续大果直接破坏前期成长节奏。
-        const roll = Phaser.Math.Between(1, 100);
-        if (roll <= 30) return 0;
-        if (roll <= 56) return 1;
-        if (roll <= 76) return 2;
-        if (roll <= 90) return 3;
-        return 4;
+        const profile = getDifficultyProfile(total);
+        return pickStartLevel(Phaser.Math.Between(1, 100), profile.levelThresholds);
       }
 
       dropFruit() {
@@ -301,6 +299,7 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
         canDrop = false;
         this.spawnFruit(this.clampX(currentLevel, currentX), 36, currentLevel, false);
         onFeedback("drop", currentLevel);
+        onPlayerDrop();
         currentLevel = nextLevel;
         nextLevel = this.randomStartLevel();
         onCurrent(currentLevel);
@@ -308,7 +307,7 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
         currentX = this.clampX(currentLevel, currentX);
         onAim(currentX);
         this.redrawGuide();
-        this.time.delayedCall(520, () => { canDrop = true; });
+        this.time.delayedCall(getDifficultyProfile(total).dropCooldownMs, () => { canDrop = true; });
       }
 
       update() {
@@ -332,7 +331,7 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
 
           const since = overflowSince.get(body.id) ?? now;
           overflowSince.set(body.id, since);
-          highestProgress = Math.max(highestProgress, (now - since) / OVERFLOW_GRACE_MS);
+          highestProgress = Math.max(highestProgress, (now - since) / getDifficultyProfile(total).overflowGraceMs);
         });
 
         Array.from(overflowSince.keys()).forEach((id) => {
@@ -383,7 +382,7 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
       bridgeRef.current = null;
       game.destroy(true);
     };
-  }, [onAim, onCombo, onCurrent, onDanger, onFeedback, onGameOver, onNext, onScore]);
+  }, [onAim, onCombo, onCurrent, onDanger, onFeedback, onGameOver, onNext, onPlayerDrop, onPlayerMove, onScore]);
 
   useEffect(() => bridgeRef.current?.setPaused(paused), [paused]);
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -421,6 +420,16 @@ function loadBestScore() {
   }
 }
 
+function loadTutorialStep(): "intro" | null {
+  try {
+    return window.localStorage.getItem(TUTORIAL_SEEN_KEY) === "true" ? null : "intro";
+  } catch {
+    return "intro";
+  }
+}
+
+type TutorialStep = "intro" | "move" | "drop" | "complete" | null;
+
 export default function Prototype() {
   const [score, setScore] = useState(0);
   const [best, setBest] = useState(loadBestScore);
@@ -433,6 +442,7 @@ export default function Prototype() {
   const [gameOverScore, setGameOverScore] = useState<number | null>(null);
   const [runId, setRunId] = useState(0);
   const [combo, setCombo] = useState<ComboState>({ count: 0, multiplier: 1 });
+  const [tutorialStep, setTutorialStep] = useState<TutorialStep>(loadTutorialStep);
   const mutedRef = useRef(muted);
   const audioContextRef = useRef<AudioContext | null>(null);
   const bestBeforeRunRef = useRef(best);
@@ -448,6 +458,50 @@ export default function Prototype() {
       // 持久化失败不影响本局计分；下一次进入只会回到默认最高分。
     }
   }, [best]);
+
+  useEffect(() => {
+    const pauseForBackground = () => {
+      // 返回游戏时不自动恢复，避免玩家还没准备好就继续计算物理和危险线倒计时。
+      if (gameOverScore === null) setPaused(true);
+    };
+    const handleVisibility = () => {
+      if (document.hidden) pauseForBackground();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("pagehide", pauseForBackground);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("pagehide", pauseForBackground);
+    };
+  }, [gameOverScore]);
+
+  useEffect(() => {
+    if (tutorialStep !== "complete") return;
+    try {
+      window.localStorage.setItem(TUTORIAL_SEEN_KEY, "true");
+    } catch {
+      // 存储不可用时仅影响下次是否再次展示，不影响当前教学流程。
+    }
+    const timer = window.setTimeout(() => setTutorialStep(null), 1800);
+    return () => window.clearTimeout(timer);
+  }, [tutorialStep]);
+
+  const skipTutorial = () => {
+    try {
+      window.localStorage.setItem(TUTORIAL_SEEN_KEY, "true");
+    } catch {
+      // 与完成教学使用同一降级策略。
+    }
+    setTutorialStep(null);
+  };
+
+  const handlePlayerMove = useCallback(() => {
+    setTutorialStep((step) => step === "move" ? "drop" : step);
+  }, []);
+
+  const handlePlayerDrop = useCallback(() => {
+    setTutorialStep((step) => step === "move" || step === "drop" ? "complete" : step);
+  }, []);
 
   const playFeedback = useCallback((kind: FeedbackKind, level = 0) => {
     if (mutedRef.current) return;
@@ -527,7 +581,7 @@ export default function Prototype() {
         </section>
 
         <section className="bin-stage">
-          <OrchardGame key={runId} onScore={handleScore} onNext={setNext} onCurrent={setCurrent} onAim={setAimX} onDanger={setDanger} onGameOver={handleGameOver} onFeedback={playFeedback} onCombo={setCombo} paused={paused} />
+          <OrchardGame key={runId} onScore={handleScore} onNext={setNext} onCurrent={setCurrent} onAim={setAimX} onDanger={setDanger} onGameOver={handleGameOver} onFeedback={playFeedback} onCombo={setCombo} onPlayerMove={handlePlayerMove} onPlayerDrop={handlePlayerDrop} paused={paused} />
           <img
             className="hanging-fruit"
             data-testid="current-fruit"
@@ -552,9 +606,26 @@ export default function Prototype() {
               <button onClick={restart}>再来一局</button>
             </section>
           )}
+          {tutorialStep === "intro" && (
+            <section className="tutorial-card" role="dialog" aria-label="新手引导">
+              <strong>三步合成大水果</strong>
+              <p>拖动选择落点，松手投放；两个相同水果碰撞后会升级。</p>
+              <button onClick={() => setTutorialStep("move")}>开始试玩</button>
+              <button className="tutorial-skip" onClick={skipTutorial}>跳过引导</button>
+            </section>
+          )}
+          {tutorialStep && tutorialStep !== "intro" && (
+            <div className={`tutorial-tip tutorial-tip--${tutorialStep}`} role="status">
+              {tutorialStep === "move" && "按住水果左右移动，选择落点"}
+              {tutorialStep === "drop" && "很好，松手把水果放进果篮"}
+              {tutorialStep === "complete" && "相同水果会合成，注意不要越过红线"}
+            </div>
+          )}
         </section>
 
-        <img className="instruction" src="/assets/game/instruction-plaque.png" alt="松手落下" />
+        <button className="instruction" onClick={() => setTutorialStep("intro")} aria-label="查看玩法说明">
+          <img src="/assets/game/instruction-plaque.png" alt="" />
+        </button>
         <p className="game-status" aria-live="polite">
           {gameOverScore !== null ? `本局结束，得分 ${gameOverScore}` : danger ? "水果接近危险线" : combo.count > 1 ? `${combo.count} 连击，${combo.multiplier} 倍得分` : `当前得分 ${score}`}
         </p>

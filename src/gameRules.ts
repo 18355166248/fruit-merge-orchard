@@ -1,6 +1,12 @@
 export const COMBO_WINDOW_MS = 1400;
 export const MAX_COMBO_MULTIPLIER = 5;
 
+export type DifficultyProfile = {
+  dropCooldownMs: number;
+  overflowGraceMs: number;
+  levelThresholds: readonly number[];
+};
+
 export type MergeReward = {
   count: number;
   multiplier: number;
@@ -12,4 +18,21 @@ export function calculateMergeReward(basePoints: number, previousCount: number, 
   const count = previousCount > 0 && elapsedMs <= COMBO_WINDOW_MS ? previousCount + 1 : 1;
   const multiplier = Math.min(count, MAX_COMBO_MULTIPLIER);
   return { count, multiplier, points: basePoints * multiplier };
+}
+
+export function getDifficultyProfile(score: number): DifficultyProfile {
+  // 难度只在清晰的分数阶段切换，避免玩家在同一段操作中感到规则持续漂移。
+  if (score < 250) {
+    return { dropCooldownMs: 520, overflowGraceMs: 1300, levelThresholds: [34, 62, 82, 95, 100] };
+  }
+  if (score < 800) {
+    return { dropCooldownMs: 470, overflowGraceMs: 1150, levelThresholds: [30, 56, 78, 93, 100] };
+  }
+  return { dropCooldownMs: 430, overflowGraceMs: 1000, levelThresholds: [26, 51, 74, 91, 100] };
+}
+
+export function pickStartLevel(roll: number, thresholds: readonly number[]) {
+  const normalizedRoll = Math.min(100, Math.max(1, roll));
+  const index = thresholds.findIndex((threshold) => normalizedRoll <= threshold);
+  return index === -1 ? thresholds.length - 1 : index;
 }
