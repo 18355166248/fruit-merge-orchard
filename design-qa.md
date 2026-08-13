@@ -65,4 +65,49 @@ expected runtime chrome and are excluded from fidelity findings.
 - P3: add merge particles and short original audio cues after the sound pack is authored.
 - P3: tune level radii after several real-device play sessions to refine difficulty.
 
+prior game-screen result: passed
+
+## Career full-screen redesign QA
+
+**Visual truth and evidence**
+
+- Existing career implementation before redesign: `docs/career-before.png`.
+- Orchard art direction reference: `docs/reference-design.png`.
+- Final iPhone and Pixel captures: `docs/career-fullscreen-iphone.png` and
+  `docs/career-fullscreen-pixel.png`.
+- Combined before/after comparison: `docs/career-comparison.png`.
+- Capture viewport: 1400 × 1200; device content viewport: 393 × 852 CSS pixels at DPR 1.
+- State: career page open with a new-player profile, so locked and unlocked treatments remain comparable.
+
+**Full-view comparison findings**
+
+- The old career UI was constrained inside the wooden bin, which weakened hierarchy, reduced the usable
+  achievement list height and visually competed with the live game underneath.
+- The new implementation uses the full phone content area, keeps the status-bar safe area clear and gives
+  score, records, progress and achievements a stable top-to-bottom reading order.
+- The iPhone and Pixel captures preserve the same centered geometry without clipping, unintended scrolling
+  or overlap with runtime chrome.
+
+**Required fidelity surfaces**
+
+- Typography and color continue the warm orchard visual system: dark walnut type, cream glass panels,
+  apricot borders and leaf-green progress accents.
+- Layout uses one responsive scale variable for padding, radii, icon sizes and gaps, avoiding per-device
+  magic offsets.
+- Record and achievement rows reuse the real fruit artwork rather than emoji or substitute icons.
+- Copy, completion count, cumulative score, highest fruit, best combo, merge count and five achievement
+  states all come from the versioned player-progress model.
+
+**Interactions tested**
+
+- Opening the career page pauses the physics scene; returning restores the prior running/paused state.
+- The visible return control and Escape key both close the page.
+- iPhone and Pixel device presets were exercised, and browser logs were checked after returning to play.
+- `npm run check:runtime`, `npm run build`, `npm run test:gameplay` and `npm run test:sites` passed.
+
+**Issue disposition**
+
+- P1 resolved: career content is no longer a small scrollable dialog inside the playfield.
+- No remaining actionable P0, P1 or P2 visual mismatch was found in the final comparison.
+
 final result: passed

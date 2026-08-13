@@ -30,7 +30,7 @@ test("首次进入会展示渐进式新手引导", async ({ page }) => {
   await page.goto("/?tutorial=1");
   await expect(page.getByRole("dialog", { name: "新手引导" })).toBeVisible();
   await page.getByRole("button", { name: "开始试玩" }).click();
-  await expect(page.getByRole("status")).toContainText("左右移动");
+  await expect(page.locator(".tutorial-tip")).toContainText("左右移动");
   await page.getByRole("button", { name: "查看玩法说明" }).click();
   await expect(page.getByRole("dialog", { name: "新手引导" })).toBeVisible();
 });
@@ -68,7 +68,29 @@ test("最高分会从本地记录恢复", async ({ page }) => {
   await expect(page.locator(".best-card strong")).toHaveText("9126");
 });
 
+test("生涯面板展示持久化统计和成就进度", async ({ page }) => {
+  await page.evaluate(() => localStorage.setItem("fruit-merge-orchard:progress:v1", JSON.stringify({
+    gamesPlayed: 3,
+    totalScore: 1260,
+    totalMerges: 52,
+    bestCombo: 4,
+    highestFruitLevel: 7,
+    unlocked: ["first-merge", "combo-3", "fruit-7", "merge-50", "games-3"],
+  })));
+  await page.reload();
+  await page.getByRole("button", { name: "查看生涯与成就" }).click();
+  const panel = page.getByRole("dialog", { name: "生涯与成就" });
+  await expect(panel).toContainText("1260");
+  await expect(panel).toContainText("第 7 级");
+  await expect(panel.locator(".achievement--unlocked")).toHaveCount(5);
+  const [panelBox, screenBox] = await Promise.all([panel.boundingBox(), page.getByTestId("device-screen").boundingBox()]);
+  if (!panelBox || !screenBox) throw new Error("生涯全屏布局不可测量");
+  expect(panelBox.width).toBeCloseTo(screenBox.width, 0);
+  expect(panelBox.height).toBeGreaterThanOrEqual(screenBox.height - 1);
+});
+
 test("键盘可以移动并投放水果", async ({ page }) => {
+  await expect(page.locator(".physics-canvas canvas")).toBeVisible();
   const game = page.getByRole("application", { name: /水果合成游戏区域/ });
   const current = page.getByTestId("current-fruit");
   const before = await current.getAttribute("style");

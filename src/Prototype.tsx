@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
-import * as Phaser from "phaser";
+import type * as PhaserTypes from "phaser";
 import { MobileScroll } from "./mobile";
+import { fruitAsset, gameAsset } from "./gameAssets";
 import { calculateMergeReward, COMBO_WINDOW_MS, getDifficultyProfile, pickStartLevel } from "./gameRules";
+import { ACHIEVEMENTS, loadPlayerProgress, savePlayerProgress, unlockAchievements, type Achievement, type PlayerProgress } from "./playerProgress";
 import "./prototype.css";
 
 const FRUIT_COUNT = 11;
@@ -16,7 +18,6 @@ const MAX_CLEAR_SCORE = 150;
 const BEST_SCORE_KEY = "fruit-merge-orchard-best";
 const TUTORIAL_SEEN_KEY = "fruit-merge-orchard-tutorial-seen";
 const DEFAULT_BEST_SCORE = 8723;
-const fruitUrl = (level: number) => `/assets/game/fruits/fruit-${String(level + 1).padStart(2, "0")}.png`;
 
 type GameBridge = {
   setPaused: (paused: boolean) => void;
@@ -40,14 +41,16 @@ type OrchardGameProps = {
   onGameOver: (score: number) => void;
   onFeedback: (kind: FeedbackKind, level?: number) => void;
   onCombo: (combo: ComboState) => void;
+  onMerge: (level: number, comboCount: number) => void;
   onPlayerMove: () => void;
   onPlayerDrop: () => void;
+  onReady: () => void;
   paused: boolean;
 };
 
 type PendingMerge = {
-  a: Phaser.Physics.Matter.Image;
-  b: Phaser.Physics.Matter.Image;
+  a: PhaserTypes.Physics.Matter.Image;
+  b: PhaserTypes.Physics.Matter.Image;
   bodyAId: number;
   bodyBId: number;
   level: number;
@@ -57,12 +60,20 @@ type PendingMerge = {
   velocityY: number;
 };
 
-function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, onFeedback, onCombo, onPlayerMove, onPlayerDrop, paused }: OrchardGameProps) {
+function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, onFeedback, onCombo, onMerge, onPlayerMove, onPlayerDrop, onReady, paused }: OrchardGameProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const bridgeRef = useRef<GameBridge | null>(null);
 
   useEffect(() => {
     if (!hostRef.current) return;
+
+    let cancelled = false;
+    let game: PhaserTypes.Game | null = null;
+
+    const boot = async () => {
+      // Phaser 占据绝大多数脚本体积，只在游戏画布真正挂载后异步下载独立分块。
+      const Phaser = await import("phaser");
+      if (cancelled || !hostRef.current) return;
 
     let total = 0;
     let nextLevel = 2;
@@ -74,8 +85,8 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
     let dangerActive = false;
     let comboCount = 0;
     let lastMergeAt = Number.NEGATIVE_INFINITY;
-    let comboResetEvent: Phaser.Time.TimerEvent | null = null;
-    let guide: Phaser.GameObjects.Graphics;
+    let comboResetEvent: PhaserTypes.Time.TimerEvent | null = null;
+    let guide: PhaserTypes.GameObjects.Graphics;
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const merging = new Set<number>();
     const pendingMerges: PendingMerge[] = [];
@@ -88,7 +99,7 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
 
       preload() {
         for (let level = 0; level < FRUIT_COUNT; level += 1) {
-          this.load.image(`fruit-${level}`, fruitUrl(level));
+          this.load.image(`fruit-${level}`, fruitAsset(level));
         }
       }
 
@@ -100,7 +111,7 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
         guide = this.add.graphics().setDepth(1);
         this.redrawGuide();
 
-        this.input.on("pointermove", (pointer: Phaser.Input.Pointer) => {
+        this.input.on("pointermove", (pointer: PhaserTypes.Input.Pointer) => {
           currentX = this.clampX(currentLevel, pointer.x);
           onAim(currentX);
           if (pointer.isDown) onPlayerMove();
@@ -109,10 +120,10 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
         this.input.on("pointerup", () => this.dropFruit());
 
         // 碰撞回调只登记合成，下一拍统一落账，避免遍历碰撞对时直接销毁 body。
-        this.matter.world.on("collisionstart", (event: Phaser.Physics.Matter.Events.CollisionStartEvent) => {
+        this.matter.world.on("collisionstart", (event: PhaserTypes.Physics.Matter.Events.CollisionStartEvent) => {
           event.pairs.forEach((pair) => {
-            const a = pair.bodyA.gameObject as Phaser.Physics.Matter.Image | undefined;
-            const b = pair.bodyB.gameObject as Phaser.Physics.Matter.Image | undefined;
+            const a = pair.bodyA.gameObject as PhaserTypes.Physics.Matter.Image | undefined;
+            const b = pair.bodyB.gameObject as PhaserTypes.Physics.Matter.Image | undefined;
             if (!a || !b || a === b || !a.active || !b.active) return;
             const la = a.getData("level") as number | undefined;
             const lb = b.getData("level") as number | undefined;
@@ -154,6 +165,7 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
           },
           drop: () => this.dropFruit(),
         };
+        onReady();
 
       }
 
@@ -170,7 +182,7 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
 
       spawnFruit(x: number, y: number, level: number, pop: boolean, velocityX = 0, velocityY = 0) {
         const diameter = RADII[level] * 2;
-        const physicsOptions: Phaser.Types.Physics.Matter.MatterBodyConfig = {
+        const physicsOptions: PhaserTypes.Types.Physics.Matter.MatterBodyConfig = {
           restitution: 0.08,
           friction: 0.018,
           frictionAir: 0.004,
@@ -284,6 +296,7 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
           this.playMergeEffect(merge.x, merge.y, level + 1, reward.points, reward.multiplier);
           onScore(total);
           onFeedback("merge", level + 1);
+          onMerge(Math.min(level + 2, FRUIT_COUNT), reward.count);
           merging.delete(bodyAId);
           merging.delete(bodyBId);
         });
@@ -317,7 +330,7 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
         const liveIds = new Set<number>();
 
         this.matter.world.getAllBodies().forEach((body) => {
-          const fruit = body.gameObject as Phaser.Physics.Matter.Image | undefined;
+          const fruit = body.gameObject as PhaserTypes.Physics.Matter.Image | undefined;
           if (!fruit || body.isStatic || !fruit.active) return;
           liveIds.add(body.id);
           const bornAt = (fruit.getData("bornAt") as number | undefined) ?? now;
@@ -356,7 +369,7 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
       }
     }
 
-    const game = new Phaser.Game({
+    game = new Phaser.Game({
       type: Phaser.AUTO,
       parent: hostRef.current,
       width: 336,
@@ -377,12 +390,16 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
       render: { antialias: true, pixelArt: false },
       scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     });
+    };
+
+    void boot();
 
     return () => {
+      cancelled = true;
       bridgeRef.current = null;
-      game.destroy(true);
+      game?.destroy(true);
     };
-  }, [onAim, onCombo, onCurrent, onDanger, onFeedback, onGameOver, onNext, onPlayerDrop, onPlayerMove, onScore]);
+  }, [onAim, onCombo, onCurrent, onDanger, onFeedback, onGameOver, onMerge, onNext, onPlayerDrop, onPlayerMove, onReady, onScore]);
 
   useEffect(() => bridgeRef.current?.setPaused(paused), [paused]);
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -443,9 +460,14 @@ export default function Prototype() {
   const [runId, setRunId] = useState(0);
   const [combo, setCombo] = useState<ComboState>({ count: 0, multiplier: 1 });
   const [tutorialStep, setTutorialStep] = useState<TutorialStep>(loadTutorialStep);
+  const [progress, setProgress] = useState<PlayerProgress>(loadPlayerProgress);
+  const [careerOpen, setCareerOpen] = useState(false);
+  const [newAchievement, setNewAchievement] = useState<Achievement | null>(null);
+  const [engineReady, setEngineReady] = useState(false);
   const mutedRef = useRef(muted);
   const audioContextRef = useRef<AudioContext | null>(null);
   const bestBeforeRunRef = useRef(best);
+  const pausedBeforeCareerRef = useRef(false);
 
   useEffect(() => {
     mutedRef.current = muted;
@@ -458,6 +480,16 @@ export default function Prototype() {
       // 持久化失败不影响本局计分；下一次进入只会回到默认最高分。
     }
   }, [best]);
+
+  useEffect(() => {
+    savePlayerProgress(progress);
+  }, [progress]);
+
+  useEffect(() => {
+    if (!newAchievement) return;
+    const timer = window.setTimeout(() => setNewAchievement(null), 2600);
+    return () => window.clearTimeout(timer);
+  }, [newAchievement]);
 
   useEffect(() => {
     const pauseForBackground = () => {
@@ -503,6 +535,8 @@ export default function Prototype() {
     setTutorialStep((step) => step === "move" || step === "drop" ? "complete" : step);
   }, []);
 
+  const handleEngineReady = useCallback(() => setEngineReady(true), []);
+
   const playFeedback = useCallback((kind: FeedbackKind, level = 0) => {
     if (mutedRef.current) return;
     try {
@@ -535,10 +569,53 @@ export default function Prototype() {
     setBest((previous) => Math.max(previous, value));
   }, []);
 
+  const handleMerge = useCallback((level: number, comboCount: number) => {
+    setProgress((previous) => {
+      const candidate: PlayerProgress = {
+        ...previous,
+        totalMerges: previous.totalMerges + 1,
+        bestCombo: Math.max(previous.bestCombo, comboCount),
+        highestFruitLevel: Math.max(previous.highestFruitLevel, level),
+      };
+      const result = unlockAchievements(candidate);
+      if (result.newlyUnlocked[0]) setNewAchievement(result.newlyUnlocked[0]);
+      return result.progress;
+    });
+  }, []);
+
   const handleGameOver = useCallback((value: number) => {
     setGameOverScore(value);
     setPaused(false);
+    setProgress((previous) => {
+      const result = unlockAchievements({
+        ...previous,
+        gamesPlayed: previous.gamesPlayed + 1,
+        totalScore: previous.totalScore + value,
+      });
+      if (result.newlyUnlocked[0]) setNewAchievement(result.newlyUnlocked[0]);
+      return result.progress;
+    });
   }, []);
+
+  const openCareer = () => {
+    pausedBeforeCareerRef.current = paused;
+    setPaused(true);
+    setCareerOpen(true);
+  };
+
+  const closeCareer = () => {
+    setCareerOpen(false);
+    if (gameOverScore === null) setPaused(pausedBeforeCareerRef.current);
+  };
+
+  useEffect(() => {
+    if (!careerOpen) return;
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") closeCareer();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [careerOpen, gameOverScore]);
 
   const restart = () => {
     setScore(0);
@@ -551,42 +628,48 @@ export default function Prototype() {
     setCombo({ count: 0, multiplier: 1 });
     bestBeforeRunRef.current = best;
     setRunId((value) => value + 1);
+    setEngineReady(false);
   };
+
+  const unlockedCount = ACHIEVEMENTS.filter((achievement) => progress.unlocked.includes(achievement.id)).length;
+  const achievementProgress = Math.round((unlockedCount / ACHIEVEMENTS.length) * 100);
 
   return (
     <MobileScroll className="app-screen orchard-scroll">
       <main className="orchard-game" data-testid="orchard-game" aria-label="果果合成">
-        <img className="orchard-bg" src="/assets/game/orchard-background.png" alt="" />
-        <img className="title-sign" src="/assets/game/title-sign.png" alt="果果合成" />
+        <img className="orchard-bg" src={gameAsset("background")} alt="" />
+        <img className="title-sign" src={gameAsset("title")} alt="果果合成" />
 
         <button className="round-control sound-control" onClick={() => setMuted((value) => !value)} aria-label={muted ? "开启声音" : "关闭声音"} aria-pressed={muted}>
-          <img src="/assets/game/sound-button.png" alt="" />
+          <img src={gameAsset("sound")} alt="" />
           {muted && <span className="muted-slash" />}
         </button>
         <button className="round-control pause-control" onClick={() => setPaused((value) => !value)} aria-label={paused ? "继续游戏" : "暂停游戏"} disabled={gameOverScore !== null}>
-          <img src="/assets/game/pause-button.png" alt="" />
+          <img src={gameAsset("pause")} alt="" />
         </button>
+        <button className="career-control" onClick={openCareer} aria-label="查看生涯与成就">生涯</button>
 
         <section className="hud-card score-card" aria-label={`得分 ${score}`}>
-          <img src="/assets/game/hud-score-empty-v2.png" alt="" />
+          <img src={gameAsset("hud-score")} alt="" />
           <strong>{score}</strong>
         </section>
         <section className="hud-card best-card" aria-label={`最高分 ${best}`}>
-          <img src="/assets/game/hud-best-empty-v2.png" alt="" />
+          <img src={gameAsset("hud-best")} alt="" />
           <strong>{best}</strong>
         </section>
         <section className="next-card" aria-label="下一个水果">
-          <img className="next-board" src="/assets/game/next-card-empty-v3-alpha.png" alt="" />
-          <img className="next-fruit" data-testid="next-fruit" src={fruitUrl(next)} alt="" />
+          <img className="next-board" src={gameAsset("next")} alt="" />
+          <img className="next-fruit" data-testid="next-fruit" src={fruitAsset(next)} alt="" />
         </section>
 
         <section className="bin-stage">
-          <OrchardGame key={runId} onScore={handleScore} onNext={setNext} onCurrent={setCurrent} onAim={setAimX} onDanger={setDanger} onGameOver={handleGameOver} onFeedback={playFeedback} onCombo={setCombo} onPlayerMove={handlePlayerMove} onPlayerDrop={handlePlayerDrop} paused={paused} />
+          <OrchardGame key={runId} onScore={handleScore} onNext={setNext} onCurrent={setCurrent} onAim={setAimX} onDanger={setDanger} onGameOver={handleGameOver} onFeedback={playFeedback} onCombo={setCombo} onMerge={handleMerge} onPlayerMove={handlePlayerMove} onPlayerDrop={handlePlayerDrop} onReady={handleEngineReady} paused={paused} />
+          {!engineReady && <div className="engine-loading" role="status"><span />正在准备果篮…</div>}
           <img
             className="hanging-fruit"
             data-testid="current-fruit"
             style={{ "--aim-left": `${19 + aimX * (329 / 336) - 22}px` } as CSSProperties}
-            src={fruitUrl(current)}
+            src={fruitAsset(current)}
             alt="当前水果"
           />
           <div className={`danger-line${danger ? " danger-line--active" : ""}`} aria-hidden="true" />
@@ -596,7 +679,7 @@ export default function Prototype() {
               <strong>x{combo.multiplier}</strong>
             </div>
           )}
-          <img className="wooden-bin" src="/assets/game/wooden-bin-frame.png" alt="" />
+          <img className="wooden-bin" src={gameAsset("bin")} alt="" />
           {paused && <button className="pause-overlay" onClick={() => setPaused(false)}>继续游戏</button>}
           {gameOverScore !== null && (
             <section className="game-over-panel" role="dialog" aria-label="本局结束">
@@ -621,14 +704,63 @@ export default function Prototype() {
               {tutorialStep === "complete" && "相同水果会合成，注意不要越过红线"}
             </div>
           )}
+          {newAchievement && <div className="achievement-toast" role="status"><small>成就解锁</small><strong>{newAchievement.title}</strong></div>}
         </section>
 
         <button className="instruction" onClick={() => setTutorialStep("intro")} aria-label="查看玩法说明">
-          <img src="/assets/game/instruction-plaque.png" alt="" />
+          <img src={gameAsset("instruction")} alt="" />
         </button>
         <p className="game-status" aria-live="polite">
           {gameOverScore !== null ? `本局结束，得分 ${gameOverScore}` : danger ? "水果接近危险线" : combo.count > 1 ? `${combo.count} 连击，${combo.multiplier} 倍得分` : `当前得分 ${score}`}
         </p>
+        {careerOpen && (
+          <section className="career-screen" role="dialog" aria-modal="true" aria-label="生涯与成就">
+            <img className="career-background" src={gameAsset("background")} alt="" />
+            <div className="career-screen-content">
+              <header className="career-header">
+                <button onClick={closeCareer} aria-label="关闭生涯与成就" autoFocus>返回游戏</button>
+                <div><small>ORCHARD JOURNEY</small><strong>果园生涯</strong></div>
+                <span>{unlockedCount}/{ACHIEVEMENTS.length}</span>
+              </header>
+
+              <section className="career-score-hero" aria-label={`累计得分 ${progress.totalScore}`}>
+                <small>累计收获</small>
+                <strong>{progress.totalScore}</strong>
+                <span>已经完成 {progress.gamesPlayed} 局果园挑战</span>
+              </section>
+
+              <div className="career-record-grid">
+                <article>
+                  <img src={fruitAsset(Math.min(progress.highestFruitLevel - 1, FRUIT_COUNT - 1))} alt="" />
+                  <div><small>最高水果</small><strong>第 {progress.highestFruitLevel} 级</strong></div>
+                </article>
+                <article>
+                  <div className="career-combo-mark" aria-hidden="true">x{Math.max(progress.bestCombo, 1)}</div>
+                  <div><small>最高连击</small><strong>{progress.bestCombo} 连击</strong></div>
+                </article>
+                <article>
+                  <div className="career-merge-mark" aria-hidden="true">{progress.totalMerges}</div>
+                  <div><small>累计合成</small><strong>{progress.totalMerges} 次</strong></div>
+                </article>
+              </div>
+
+              <section className="career-achievements" aria-label="成就进度">
+                <header><div><small>成长记录</small><strong>果园成就</strong></div><span>{achievementProgress}%</span></header>
+                <div className="career-progress" aria-label={`成就完成度 ${achievementProgress}%`}><span style={{ width: `${achievementProgress}%` }} /></div>
+                <div className="achievement-list">
+                  {ACHIEVEMENTS.map((achievement, index) => {
+                    const unlocked = progress.unlocked.includes(achievement.id);
+                    return <article key={achievement.id} className={unlocked ? "achievement achievement--unlocked" : "achievement"}>
+                      <img src={fruitAsset(Math.min(index + 1, FRUIT_COUNT - 1))} alt="" />
+                      <div><strong>{achievement.title}</strong><small>{achievement.description}</small></div>
+                      <span>{unlocked ? "已解锁" : "待完成"}</span>
+                    </article>;
+                  })}
+                </div>
+              </section>
+            </div>
+          </section>
+        )}
       </main>
     </MobileScroll>
   );

@@ -22,6 +22,7 @@
 .sound-control { left: 310px; }
 .pause-control { left: 350px; }
 .muted-slash { position: absolute; inset: 8px 20px; border-left: 3px solid #8f4513; transform: rotate(-42deg); border-radius: 8px; }
+.career-control { position: absolute; z-index: 8; left: calc(24 * var(--ui-scale)); top: calc(116 * var(--ui-scale)); min-width: calc(54 * var(--ui-scale)); min-height: calc(25 * var(--ui-scale)); border: 2px solid #d58a3a; border-radius: 14px; background: #fff1c8; box-shadow: 0 2px 0 #8e4a1d55; color: #7b3a10; font: 700 calc(13 * var(--ui-scale))/1 "STKaiti", serif; cursor: pointer; }
 
 .hud-card, .next-card { position: absolute; z-index: 6; }
 .hud-card img, .next-board { display: block; width: 100%; height: 100%; object-fit: contain; }
@@ -64,6 +65,8 @@
 .bin-stage { position: absolute; z-index: 4; left: 12px; top: 254px; width: 369px; height: 500px; }
 .physics-canvas { position: absolute; z-index: 2; left: 19px; top: 17px; width: 329px; height: 464px; overflow: hidden; touch-action: none; background: rgba(255, 226, 168, 0.78); }
 .physics-canvas canvas { display: block; width: 329px !important; height: 464px !important; }
+.engine-loading { position: absolute; z-index: 3; inset: 18px 20px 20px; display: grid; place-content: center; justify-items: center; gap: 9px; color: #9a622d; font-size: 15px; font-weight: 700; pointer-events: none; }
+.engine-loading span { width: 30px; height: 30px; border: 4px solid #efbd6b66; border-top-color: #dd742c; border-radius: 50%; animation: engine-spin 700ms linear infinite; }
 .wooden-bin { position: absolute; z-index: 5; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
 .danger-line { position: absolute; z-index: 3; left: 22px; right: 22px; top: 61px; height: 4px; border-top: 4px dashed #f04c18; filter: drop-shadow(0 1px 0 #fff2cb); pointer-events: none; }
 .danger-line--active { border-top-color: #d52d12; filter: drop-shadow(0 0 5px #ff3b18); animation: danger-pulse 0.48s ease-in-out infinite alternate; }
@@ -111,6 +114,54 @@
 .tutorial-tip { position: absolute; z-index: 8; left: 50%; top: 94px; width: max-content; max-width: 250px; transform: translateX(-50%); padding: 8px 13px; border: 2px solid #df8c35; border-radius: 18px; background: rgba(255, 246, 211, 0.96); box-shadow: 0 3px 0 #8d4b1f44; color: #814114; font-size: 14px; font-weight: 700; text-align: center; pointer-events: none; animation: tutorial-rise 220ms ease-out; }
 .tutorial-tip--complete { border-color: #87a934; color: #5f7f20; }
 
+.career-screen { position: absolute; z-index: 20; inset: 0; min-height: 852px; overflow: hidden; background: #f7d68c; color: #68350f; }
+.career-background { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: saturate(0.82) brightness(1.04); }
+.career-screen::after { content: ""; position: absolute; inset: 0; background: rgba(255, 244, 211, 0.68); backdrop-filter: blur(4px); pointer-events: none; }
+.career-screen-content { position: absolute; z-index: 1; inset: 0; overflow-y: auto; padding: calc(54 * var(--ui-scale)) calc(20 * var(--ui-scale)) calc(42 * var(--ui-scale)); scrollbar-width: none; }
+.career-screen-content::-webkit-scrollbar { display: none; }
+.career-header { min-height: calc(64 * var(--ui-scale)); display: grid; grid-template-columns: 80px 1fr 44px; align-items: center; gap: 8px; }
+.career-header button { min-height: 34px; border: 2px solid #d28734; border-radius: 18px; background: #fff3cd; box-shadow: 0 2px 0 #82431c44; color: #784018; font: 700 calc(14 * var(--ui-scale))/1 "STKaiti", serif; cursor: pointer; }
+.career-header div { display: grid; justify-items: center; gap: 1px; }
+.career-header div small { color: #bd6c2c; font: 700 calc(8 * var(--ui-scale))/1 Georgia, serif; letter-spacing: 0.12em; }
+.career-header div strong { font-size: calc(25 * var(--ui-scale)); letter-spacing: 0.08em; }
+.career-header > span { display: grid; place-items: center; min-height: 34px; border-radius: 17px; background: #799d32; box-shadow: 0 2px 0 #4e721e55; color: #fff8d9; font: 700 calc(13 * var(--ui-scale))/1 Georgia, serif; }
+
+.career-score-hero { position: relative; margin-top: calc(8 * var(--ui-scale)); min-height: calc(142 * var(--ui-scale)); display: grid; place-content: center; justify-items: center; gap: 5px; border: 3px solid #d8943d; border-radius: calc(24 * var(--ui-scale)); background: rgba(255, 246, 216, 0.96); box-shadow: 0 7px 0 #87471e35, inset 0 0 24px #f2b85b33; }
+.career-score-hero small { color: #b46b2d; font-size: calc(13 * var(--ui-scale)); font-weight: 700; }
+.career-score-hero strong { color: #713508; font: 700 calc(43 * var(--ui-scale))/0.95 Georgia, serif; text-shadow: 0 2px 0 #fff; }
+.career-score-hero span { color: #9a6234; font-size: calc(12 * var(--ui-scale)); }
+
+.career-record-grid { margin-top: calc(13 * var(--ui-scale)); display: grid; grid-template-columns: 1fr 1fr 1fr; gap: calc(8 * var(--ui-scale)); }
+.career-record-grid article { min-height: calc(105 * var(--ui-scale)); display: grid; align-content: center; justify-items: center; gap: 5px; padding: 8px 4px; border: 2px solid #deb16f; border-radius: calc(17 * var(--ui-scale)); background: rgba(255, 250, 230, 0.94); box-shadow: 0 4px 0 #92512026; text-align: center; }
+.career-record-grid img { width: calc(47 * var(--ui-scale)); height: calc(47 * var(--ui-scale)); object-fit: contain; }
+.career-record-grid article > div:last-child { display: grid; gap: 2px; }
+.career-record-grid small { color: #a36a3b; font-size: calc(10 * var(--ui-scale)); }
+.career-record-grid strong { color: #713912; font-size: calc(14 * var(--ui-scale)); }
+.career-combo-mark, .career-merge-mark { display: grid; place-items: center; width: calc(48 * var(--ui-scale)); height: calc(48 * var(--ui-scale)); border-radius: 50%; background: #f18a37; box-shadow: inset 0 -5px 0 #b84d19; color: #fff6d4; font: 700 calc(17 * var(--ui-scale))/1 Georgia, serif; }
+.career-merge-mark { background: #82a83a; box-shadow: inset 0 -5px 0 #52771f; }
+
+.career-achievements { margin-top: calc(15 * var(--ui-scale)); padding: calc(16 * var(--ui-scale)); border: 2px solid #d99b50; border-radius: calc(22 * var(--ui-scale)); background: rgba(255, 246, 218, 0.96); box-shadow: 0 6px 0 #8143192e; }
+.career-achievements > header { display: flex; align-items: end; justify-content: space-between; }
+.career-achievements > header div { display: grid; gap: 2px; }
+.career-achievements > header small { color: #b76b2b; font-size: calc(10 * var(--ui-scale)); font-weight: 700; }
+.career-achievements > header strong { font-size: calc(21 * var(--ui-scale)); }
+.career-achievements > header > span { color: #75952f; font: 700 calc(18 * var(--ui-scale))/1 Georgia, serif; }
+.career-progress { height: calc(9 * var(--ui-scale)); margin: calc(10 * var(--ui-scale)) 0 calc(13 * var(--ui-scale)); overflow: hidden; border-radius: 5px; background: #ead8b3; box-shadow: inset 0 1px 2px #7d431d33; }
+.career-progress span { display: block; min-width: 3px; height: 100%; border-radius: inherit; background: #82a83a; transition: width 260ms ease; }
+.achievement-list { display: grid; gap: calc(8 * var(--ui-scale)); }
+.achievement { min-height: calc(58 * var(--ui-scale)); display: grid; grid-template-columns: calc(42 * var(--ui-scale)) 1fr auto; align-items: center; gap: calc(9 * var(--ui-scale)); padding: calc(7 * var(--ui-scale)) calc(10 * var(--ui-scale)); border: 1px solid #d8c8a7; border-radius: calc(14 * var(--ui-scale)); background: #e9e1cf; color: #8d7b64; }
+.achievement > img { width: calc(40 * var(--ui-scale)); height: calc(40 * var(--ui-scale)); object-fit: contain; filter: grayscale(1); opacity: 0.48; }
+.achievement div { display: grid; gap: 3px; }
+.achievement strong { font-size: calc(14 * var(--ui-scale)); }
+.achievement small { font-size: calc(10 * var(--ui-scale)); }
+.achievement > span { padding: 4px 7px; border-radius: 11px; background: #c8bcaa; color: #fff; font-size: calc(9 * var(--ui-scale)); font-weight: 700; }
+.achievement--unlocked { border-color: #e5b45f; background: #fff0b8; color: #764318; }
+.achievement--unlocked > img { filter: none; opacity: 1; }
+.achievement--unlocked > span { background: #7fa62f; }
+.achievement-toast { position: absolute; z-index: 12; left: 50%; top: 110px; min-width: 150px; transform: translateX(-50%); display: grid; justify-items: center; gap: 2px; padding: 8px 15px; border: 2px solid #dc8a2f; border-radius: 18px; background: #fff2bd; box-shadow: 0 4px 0 #81421755; color: #713912; animation: achievement-in 260ms ease-out; pointer-events: none; }
+.achievement-toast small { color: #d55f20; font-size: 11px; font-weight: 700; }
+.achievement-toast strong { font-size: 17px; }
+
 .pause-overlay { position: absolute; z-index: 7; left: 50%; top: 46%; transform: translate(-50%, -50%); border: 3px solid #d98c35; border-radius: 18px; padding: 12px 20px; background: #fff0c9; box-shadow: 0 5px 0 #9d551f55; color: #713912; font: 700 19px/1 "STKaiti", serif; }
 .game-over-panel { position: absolute; z-index: 8; left: 50%; top: 46%; transform: translate(-50%, -50%); width: 218px; padding: 23px 20px 19px; display: grid; justify-items: center; gap: 9px; border: 4px solid #d88a31; border-radius: 23px; background: #fff0c9; box-shadow: 0 8px 0 #82421855, 0 15px 30px #51270d40; color: #713912; text-align: center; }
 .game-over-panel span { font-size: 24px; font-weight: 700; }
@@ -126,9 +177,11 @@ button:focus-visible { outline: 3px solid #ef6a28; outline-offset: 2px; }
 @keyframes danger-pulse { from { opacity: 0.72; } to { opacity: 1; } }
 @keyframes combo-pop { from { opacity: 0; transform: scale(0.78); } to { opacity: 1; transform: scale(1); } }
 @keyframes tutorial-rise { from { opacity: 0; transform: translate(-50%, 7px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes engine-spin { to { transform: rotate(360deg); } }
+@keyframes achievement-in { from { opacity: 0; transform: translate(-50%, -8px) scale(0.9); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .danger-line--active, .combo-banner, .tutorial-tip { animation: none; }
+  .danger-line--active, .combo-banner, .tutorial-tip, .engine-loading span, .achievement-toast { animation: none; }
 }
 
 @media (max-height: 900px) {
