@@ -1,0 +1,91 @@
+.orchard-scroll { container-type: inline-size; background: #f6c56f; overflow: hidden !important; }
+
+.orchard-game {
+  position: relative;
+  width: 100%;
+  min-height: 852px;
+  /* HUD 以手机内容区为基准缩放，避免桌面预览视口影响组件尺寸。 */
+  --ui-scale: calc(100cqw / 393);
+  overflow: hidden;
+  color: #713912;
+  font-family: "STKaiti", "KaiTi", "Noto Serif SC", serif;
+  user-select: none;
+  touch-action: none;
+}
+
+.orchard-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.title-sign { position: absolute; z-index: 5; top: 42px; left: 89px; width: 214px; height: auto; }
+
+.round-control { position: absolute; z-index: 8; top: 72px; width: 38px; height: 42px; border: 0; padding: 0; background: transparent; cursor: pointer; }
+.round-control img { width: 100%; height: 100%; object-fit: contain; }
+.sound-control { left: 310px; }
+.pause-control { left: 350px; }
+.muted-slash { position: absolute; inset: 8px 20px; border-left: 3px solid #8f4513; transform: rotate(-42deg); border-radius: 8px; }
+
+.hud-card, .next-card { position: absolute; z-index: 6; }
+.hud-card img, .next-board { display: block; width: 100%; height: 100%; object-fit: contain; }
+.score-card { left: calc(13 * var(--ui-scale)); top: calc(143 * var(--ui-scale)); width: calc(124 * var(--ui-scale)); aspect-ratio: 1070 / 400; }
+.best-card { left: calc(13 * var(--ui-scale)); top: calc(207 * var(--ui-scale)); width: calc(124 * var(--ui-scale)); aspect-ratio: 1070 / 386; }
+.hud-card strong {
+  position: absolute;
+  left: 50%;
+  top: 67%;
+  width: 78%;
+  height: 42%;
+  /* Georgia 数字的字形重心低于 line box 中心，用 em 补偿可随字号等比缩放。 */
+  transform: translate(-50%, -50%) translateY(-0.12em);
+  display: grid;
+  place-items: center;
+  color: #7b3a10;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: calc(20 * var(--ui-scale));
+  line-height: 1;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 0 #fff6dc;
+}
+.best-card strong { top: 67%; font-size: calc(19 * var(--ui-scale)); }
+.next-card { right: calc(14 * var(--ui-scale)); top: calc(132 * var(--ui-scale)); width: calc(94 * var(--ui-scale)); aspect-ratio: 1062 / 1275; }
+.next-fruit { position: absolute; z-index: 2; left: 50%; top: 56%; width: 48%; aspect-ratio: 1; transform: translate(-50%, -50%); object-fit: contain; filter: drop-shadow(0 2px 2px #9c612c55); }
+.hanging-fruit {
+  position: absolute;
+  z-index: 6;
+  /* 与 Matter 的 336 宽逻辑画布同轴，水果中心始终对应真实落点。 */
+  left: var(--aim-left);
+  top: 17px;
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 1px #6f3c2044);
+  pointer-events: none;
+}
+
+.bin-stage { position: absolute; z-index: 4; left: 12px; top: 254px; width: 369px; height: 500px; }
+.physics-canvas { position: absolute; z-index: 2; left: 19px; top: 17px; width: 329px; height: 464px; overflow: hidden; touch-action: none; background: rgba(255, 226, 168, 0.78); }
+.physics-canvas canvas { display: block; width: 329px !important; height: 464px !important; }
+.wooden-bin { position: absolute; z-index: 5; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
+.danger-line { position: absolute; z-index: 3; left: 22px; right: 22px; top: 61px; height: 4px; border-top: 4px dashed #f04c18; filter: drop-shadow(0 1px 0 #fff2cb); pointer-events: none; }
+.danger-line--active { border-top-color: #d52d12; filter: drop-shadow(0 0 5px #ff3b18); animation: danger-pulse 0.48s ease-in-out infinite alternate; }
+
+.pause-overlay { position: absolute; z-index: 7; left: 50%; top: 46%; transform: translate(-50%, -50%); border: 3px solid #d98c35; border-radius: 18px; padding: 12px 20px; background: #fff0c9; box-shadow: 0 5px 0 #9d551f55; color: #713912; font: 700 19px/1 "STKaiti", serif; }
+.game-over-panel { position: absolute; z-index: 8; left: 50%; top: 46%; transform: translate(-50%, -50%); width: 218px; padding: 23px 20px 19px; display: grid; justify-items: center; gap: 9px; border: 4px solid #d88a31; border-radius: 23px; background: #fff0c9; box-shadow: 0 8px 0 #82421855, 0 15px 30px #51270d40; color: #713912; text-align: center; }
+.game-over-panel span { font-size: 24px; font-weight: 700; }
+.game-over-panel strong { font: 700 31px/1 Georgia, serif; }
+.game-over-panel button { min-width: 132px; min-height: 43px; margin-top: 4px; border: 0; border-radius: 22px; background: #ed7b31; box-shadow: inset 0 -4px 0 #b54d18; color: #fff7db; font: 700 18px/1 "STKaiti", serif; }
+.instruction { position: absolute; z-index: 7; left: 83px; bottom: 28px; width: 230px; height: auto; pointer-events: none; }
+
+button:focus-visible { outline: 3px solid #ef6a28; outline-offset: 2px; }
+
+@keyframes danger-pulse { from { opacity: 0.72; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .danger-line--active { animation: none; }
+}
+
+@media (max-height: 900px) {
+  .orchard-game { min-height: 852px; }
+}
+
+@media (min-width: 394px) {
+  .orchard-game { min-height: calc(852 * var(--ui-scale)); }
+}
