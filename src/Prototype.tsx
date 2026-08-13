@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import * as Phaser from "phaser";
 import { MobileScroll } from "./mobile";
 import "./prototype.css";
 
 const FRUIT_COUNT = 11;
-const START_LEVELS = 5;
 const RADII = [12, 16, 21, 27, 34, 43, 53, 65, 78, 93, 108];
 const SCORES = [1, 3, 6, 10, 15, 21, 28, 36, 45, 55, 66];
 const WORLD_LEFT = 9;
@@ -14,11 +13,17 @@ const DANGER_Y = 45;
 const SPAWN_PROTECTION_MS = 900;
 const OVERFLOW_GRACE_MS = 1200;
 const MAX_CLEAR_SCORE = 150;
+const BEST_SCORE_KEY = "fruit-merge-orchard-best";
+const DEFAULT_BEST_SCORE = 8723;
 const fruitUrl = (level: number) => `/assets/game/fruits/fruit-${String(level + 1).padStart(2, "0")}.png`;
 
 type GameBridge = {
   setPaused: (paused: boolean) => void;
+  nudge: (direction: -1 | 1) => void;
+  drop: () => void;
 };
+
+type FeedbackKind = "drop" | "merge" | "game-over";
 
 type OrchardGameProps = {
   onScore: (score: number) => void;
@@ -27,6 +32,7 @@ type OrchardGameProps = {
   onAim: (x: number) => void;
   onDanger: (active: boolean) => void;
   onGameOver: (score: number) => void;
+  onFeedback: (kind: FeedbackKind, level?: number) => void;
   paused: boolean;
 };
 
@@ -42,7 +48,7 @@ type PendingMerge = {
   velocityY: number;
 };
 
-function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, paused }: OrchardGameProps) {
+function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, onFeedback, paused }: OrchardGameProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const bridgeRef = useRef<GameBridge | null>(null);
 
@@ -123,6 +129,13 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
             this.matter.world.enabled = !value;
             this.input.enabled = !value;
           },
+          nudge: (direction) => {
+            if (isGameOver || !this.input.enabled) return;
+            currentX = this.clampX(currentLevel, currentX + direction * 16);
+            onAim(currentX);
+            this.redrawGuide();
+          },
+          drop: () => this.dropFruit(),
         };
 
       }
@@ -192,17 +205,29 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
             total += SCORES[resultLevel];
           }
           onScore(total);
+          onFeedback("merge", level + 1);
           merging.delete(bodyAId);
           merging.delete(bodyBId);
         });
+      }
+
+      randomStartLevel() {
+        // 低级水果权重更高，既保留随机性，也避免连续大果直接破坏前期成长节奏。
+        const roll = Phaser.Math.Between(1, 100);
+        if (roll <= 30) return 0;
+        if (roll <= 56) return 1;
+        if (roll <= 76) return 2;
+        if (roll <= 90) return 3;
+        return 4;
       }
 
       dropFruit() {
         if (!canDrop || isGameOver) return;
         canDrop = false;
         this.spawnFruit(this.clampX(currentLevel, currentX), 36, currentLevel, false);
+        onFeedback("drop", currentLevel);
         currentLevel = nextLevel;
-        nextLevel = Phaser.Math.Between(0, START_LEVELS - 1);
+        nextLevel = this.randomStartLevel();
         onCurrent(currentLevel);
         onNext(nextLevel);
         currentX = this.clampX(currentLevel, currentX);
@@ -251,6 +276,7 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
           this.input.enabled = false;
           this.matter.world.enabled = false;
           onDanger(false);
+          onFeedback("game-over");
           onGameOver(total);
         }
       }
@@ -282,15 +308,47 @@ function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, 
       bridgeRef.current = null;
       game.destroy(true);
     };
-  }, [onAim, onCurrent, onDanger, onGameOver, onNext, onScore]);
+  }, [onAim, onCurrent, onDanger, onFeedback, onGameOver, onNext, onScore]);
 
   useEffect(() => bridgeRef.current?.setPaused(paused), [paused]);
-  return <div ref={hostRef} className="physics-canvas" data-scroll-drag="ignore" aria-label="水果合成游戏区域" />;
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      bridgeRef.current?.nudge(event.key === "ArrowLeft" ? -1 : 1);
+    }
+    if (event.key === " " || event.key === "Enter") {
+      event.preventDefault();
+      bridgeRef.current?.drop();
+    }
+  };
+
+  return (
+    <div
+      ref={hostRef}
+      className="physics-canvas"
+      data-scroll-drag="ignore"
+      role="application"
+      tabIndex={0}
+      aria-label="水果合成游戏区域。左右方向键移动，空格或回车落下水果"
+      aria-keyshortcuts="ArrowLeft ArrowRight Space Enter"
+      onKeyDown={handleKeyDown}
+    />
+  );
+}
+
+function loadBestScore() {
+  try {
+    const saved = Number(window.localStorage.getItem(BEST_SCORE_KEY));
+    return Number.isFinite(saved) && saved >= 0 ? Math.max(DEFAULT_BEST_SCORE, saved) : DEFAULT_BEST_SCORE;
+  } catch {
+    // 隐私模式或存储被禁用时退回展示基准，不阻断核心玩法。
+    return DEFAULT_BEST_SCORE;
+  }
 }
 
 export default function Prototype() {
   const [score, setScore] = useState(0);
-  const [best, setBest] = useState(8723);
+  const [best, setBest] = useState(loadBestScore);
   const [next, setNext] = useState(2);
   const [current, setCurrent] = useState(3);
   const [aimX, setAimX] = useState(168);
@@ -299,6 +357,48 @@ export default function Prototype() {
   const [danger, setDanger] = useState(false);
   const [gameOverScore, setGameOverScore] = useState<number | null>(null);
   const [runId, setRunId] = useState(0);
+  const mutedRef = useRef(muted);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const bestBeforeRunRef = useRef(best);
+
+  useEffect(() => {
+    mutedRef.current = muted;
+  }, [muted]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(BEST_SCORE_KEY, String(best));
+    } catch {
+      // 持久化失败不影响本局计分；下一次进入只会回到默认最高分。
+    }
+  }, [best]);
+
+  const playFeedback = useCallback((kind: FeedbackKind, level = 0) => {
+    if (mutedRef.current) return;
+    try {
+      const AudioContextClass = window.AudioContext ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const context = audioContextRef.current ?? new AudioContextClass();
+      audioContextRef.current = context;
+      void context.resume();
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      const now = context.currentTime;
+      const duration = kind === "game-over" ? 0.34 : kind === "merge" ? 0.13 : 0.07;
+      const startFrequency = kind === "game-over" ? 310 : kind === "merge" ? 360 + Math.min(level, 10) * 24 : 185;
+      oscillator.type = kind === "drop" ? "triangle" : "sine";
+      oscillator.frequency.setValueAtTime(startFrequency, now);
+      oscillator.frequency.exponentialRampToValueAtTime(kind === "game-over" ? 120 : startFrequency * 1.22, now + duration);
+      gain.gain.setValueAtTime(kind === "drop" ? 0.025 : 0.045, now);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+      oscillator.connect(gain).connect(context.destination);
+      oscillator.start(now);
+      oscillator.stop(now + duration);
+      if ("vibrate" in navigator) navigator.vibrate(kind === "merge" ? [10, 18, 12] : kind === "game-over" ? [30, 35, 50] : 6);
+    } catch {
+      // Web Audio 或振动在部分内嵌浏览器不可用，静默降级保证投放与物理循环继续。
+    }
+  }, []);
 
   const handleScore = useCallback((value: number) => {
     setScore(value);
@@ -318,6 +418,7 @@ export default function Prototype() {
     setDanger(false);
     setGameOverScore(null);
     setPaused(false);
+    bestBeforeRunRef.current = best;
     setRunId((value) => value + 1);
   };
 
@@ -327,11 +428,11 @@ export default function Prototype() {
         <img className="orchard-bg" src="/assets/game/orchard-background.png" alt="" />
         <img className="title-sign" src="/assets/game/title-sign.png" alt="果果合成" />
 
-        <button className="round-control sound-control" onClick={() => setMuted((value) => !value)} aria-label={muted ? "开启声音" : "关闭声音"}>
+        <button className="round-control sound-control" onClick={() => setMuted((value) => !value)} aria-label={muted ? "开启声音" : "关闭声音"} aria-pressed={muted}>
           <img src="/assets/game/sound-button.png" alt="" />
           {muted && <span className="muted-slash" />}
         </button>
-        <button className="round-control pause-control" onClick={() => setPaused((value) => !value)} aria-label={paused ? "继续游戏" : "暂停游戏"}>
+        <button className="round-control pause-control" onClick={() => setPaused((value) => !value)} aria-label={paused ? "继续游戏" : "暂停游戏"} disabled={gameOverScore !== null}>
           <img src="/assets/game/pause-button.png" alt="" />
         </button>
 
@@ -349,7 +450,7 @@ export default function Prototype() {
         </section>
 
         <section className="bin-stage">
-          <OrchardGame key={runId} onScore={handleScore} onNext={setNext} onCurrent={setCurrent} onAim={setAimX} onDanger={setDanger} onGameOver={handleGameOver} paused={paused} />
+          <OrchardGame key={runId} onScore={handleScore} onNext={setNext} onCurrent={setCurrent} onAim={setAimX} onDanger={setDanger} onGameOver={handleGameOver} onFeedback={playFeedback} paused={paused} />
           <img
             className="hanging-fruit"
             data-testid="current-fruit"
@@ -364,12 +465,16 @@ export default function Prototype() {
             <section className="game-over-panel" role="dialog" aria-label="本局结束">
               <span>果篮装满啦</span>
               <strong>{gameOverScore} 分</strong>
+              {gameOverScore > bestBeforeRunRef.current && <small>新的最高分！</small>}
               <button onClick={restart}>再来一局</button>
             </section>
           )}
         </section>
 
         <img className="instruction" src="/assets/game/instruction-plaque.png" alt="松手落下" />
+        <p className="game-status" aria-live="polite">
+          {gameOverScore !== null ? `本局结束，得分 ${gameOverScore}` : danger ? "水果接近危险线" : `当前得分 ${score}`}
+        </p>
       </main>
     </MobileScroll>
   );

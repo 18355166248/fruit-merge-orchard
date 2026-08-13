@@ -44,6 +44,24 @@ test("暂停、恢复和声音状态可交互", async ({ page }) => {
   await expect(page.getByRole("button", { name: "开启声音" })).toBeVisible();
 });
 
+test("最高分会从本地记录恢复", async ({ page }) => {
+  await page.evaluate(() => localStorage.setItem("fruit-merge-orchard-best", "9126"));
+  await page.reload();
+  await expect(page.locator(".best-card strong")).toHaveText("9126");
+});
+
+test("键盘可以移动并投放水果", async ({ page }) => {
+  const game = page.getByRole("application", { name: /水果合成游戏区域/ });
+  const current = page.getByTestId("current-fruit");
+  const before = await current.getAttribute("style");
+
+  await game.focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect(current).not.toHaveAttribute("style", before ?? "");
+  await page.keyboard.press("Space");
+  await expect(page.getByTestId("current-fruit")).toHaveAttribute("src", /fruit-03\.png$/);
+});
+
 test("左右极限投放不会遮挡 HUD", async ({ page }) => {
   const canvas = page.locator(".physics-canvas canvas");
   const current = page.getByTestId("current-fruit");
