@@ -70,6 +70,10 @@
 .physics-canvas canvas { display: block; width: 329px !important; height: 464px !important; }
 .engine-loading { position: absolute; z-index: 3; inset: 18px 20px 20px; display: grid; place-content: center; justify-items: center; gap: 9px; color: #9a622d; font-size: 15px; font-weight: 700; pointer-events: none; }
 .engine-loading span { width: 30px; height: 30px; border: 4px solid #efbd6b66; border-top-color: #dd742c; border-radius: 50%; animation: engine-spin 700ms linear infinite; }
+.engine-error { position: absolute; z-index: 7; inset: 18px 20px 20px; display: grid; place-content: center; justify-items: center; gap: 8px; padding: 24px; background: rgba(255, 238, 197, 0.94); color: #713912; text-align: center; }
+.engine-error strong { font-size: 21px; }
+.engine-error span { color: #9a622d; font-size: 14px; }
+.engine-error button { min-width: 124px; min-height: 40px; margin-top: 5px; border: 0; border-radius: 20px; background: #ed7b31; box-shadow: inset 0 -4px 0 #b54d18; color: #fff7db; font-weight: 700; }
 .wooden-bin { position: absolute; z-index: 5; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
 .danger-line { position: absolute; z-index: 3; left: 22px; right: 22px; top: 61px; height: 4px; border-top: 4px dashed #f04c18; filter: drop-shadow(0 1px 0 #fff2cb); pointer-events: none; }
 .danger-line--active { border-top-color: #d52d12; filter: drop-shadow(0 0 5px #ff3b18); animation: danger-pulse 0.48s ease-in-out infinite alternate; }

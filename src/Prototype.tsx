@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type SyntheticEvent } from "react";
 import { MobileScroll } from "./mobile";
 import { CareerScreen } from "./CareerScreen";
-import { fruitAsset, gameAsset } from "./gameAssets";
+import { applyImageFallback, fruitAsset, gameAsset, localFruitAsset, localGameAsset, type GameAssetKey } from "./gameAssets";
 import { clearPlayerRecord, loadBestScore, loadGameSettings, saveBestScore, saveGameSettings, TUTORIAL_SEEN_KEY } from "./gameStorage";
 import { loadPlayerProgress, savePlayerProgress, unlockAchievements, type Achievement, type PlayerProgress } from "./playerProgress";
 import { OrchardGame, type ComboState } from "./OrchardGame";
@@ -18,6 +18,14 @@ function loadTutorialStep(): "intro" | null {
 }
 
 type TutorialStep = "intro" | "move" | "drop" | "complete" | null;
+
+const fallbackToGameAsset = (key: GameAssetKey) => (event: SyntheticEvent<HTMLImageElement>) => {
+  applyImageFallback(event.currentTarget, localGameAsset(key));
+};
+
+const fallbackToFruitAsset = (level: number) => (event: SyntheticEvent<HTMLImageElement>) => {
+  applyImageFallback(event.currentTarget, localFruitAsset(level));
+};
 
 export default function Prototype() {
   const [score, setScore] = useState(0);
@@ -37,6 +45,7 @@ export default function Prototype() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [newAchievement, setNewAchievement] = useState<Achievement | null>(null);
   const [engineReady, setEngineReady] = useState(false);
+  const [engineError, setEngineError] = useState<string | null>(null);
   const bestBeforeRunRef = useRef(best);
   const pausedBeforePanelRef = useRef(false);
   const playFeedback = useGameFeedback(settings);
@@ -104,6 +113,7 @@ export default function Prototype() {
   }, []);
 
   const handleEngineReady = useCallback(() => setEngineReady(true), []);
+  const handleEngineLoadError = useCallback((message: string) => setEngineError(message), []);
 
   const handleScore = useCallback((value: number) => {
     setScore(value);
@@ -184,45 +194,60 @@ export default function Prototype() {
     bestBeforeRunRef.current = best;
     setRunId((value) => value + 1);
     setEngineReady(false);
+    setEngineError(null);
+  };
+
+  const retryEngine = () => {
+    setEngineReady(false);
+    setEngineError(null);
+    setRunId((value) => value + 1);
   };
 
   return (
     <MobileScroll className="app-screen orchard-scroll">
       <main className="orchard-game" data-testid="orchard-game" aria-label="果果合成">
-        <img className="orchard-bg" src={gameAsset("background")} alt="" />
-        <img className="title-sign" src={gameAsset("title")} alt="果果合成" />
+        <img className="orchard-bg" src={gameAsset("background")} onError={fallbackToGameAsset("background")} alt="" />
+        <img className="title-sign" src={gameAsset("title")} onError={fallbackToGameAsset("title")} alt="果果合成" />
 
         <button className="round-control sound-control" onClick={() => setSettings((value) => ({ ...value, soundEnabled: !value.soundEnabled }))} aria-label={settings.soundEnabled ? "关闭声音" : "开启声音"} aria-pressed={!settings.soundEnabled}>
-          <img src={gameAsset("sound")} alt="" />
+          <img src={gameAsset("sound")} onError={fallbackToGameAsset("sound")} alt="" />
           {!settings.soundEnabled && <span className="muted-slash" />}
         </button>
         <button className="round-control pause-control" onClick={() => setPaused((value) => !value)} aria-label={paused ? "继续游戏" : "暂停游戏"} disabled={gameOverScore !== null}>
-          <img src={gameAsset("pause")} alt="" />
+          <img src={gameAsset("pause")} onError={fallbackToGameAsset("pause")} alt="" />
         </button>
         <button className="career-control" onClick={openCareer} aria-label="查看生涯与成就">生涯</button>
         <button className="settings-control" onClick={openSettings} aria-label="打开游戏设置">设置</button>
 
         <section className="hud-card score-card" aria-label={`得分 ${score}`}>
-          <img src={gameAsset("hud-score")} alt="" />
+          <img src={gameAsset("hud-score")} onError={fallbackToGameAsset("hud-score")} alt="" />
           <strong>{score}</strong>
         </section>
         <section className="hud-card best-card" aria-label={`最高分 ${best}`}>
-          <img src={gameAsset("hud-best")} alt="" />
+          <img src={gameAsset("hud-best")} onError={fallbackToGameAsset("hud-best")} alt="" />
           <strong>{best}</strong>
         </section>
         <section className="next-card" aria-label="下一个水果">
-          <img className="next-board" src={gameAsset("next")} alt="" />
-          <img className="next-fruit" data-testid="next-fruit" src={fruitAsset(next)} alt="" />
+          <img className="next-board" src={gameAsset("next")} onError={fallbackToGameAsset("next")} alt="" />
+          <img className="next-fruit" data-testid="next-fruit" src={fruitAsset(next)} onError={fallbackToFruitAsset(next)} alt="" />
         </section>
 
         <section className="bin-stage">
-          <OrchardGame key={runId} onScore={handleScore} onNext={setNext} onCurrent={setCurrent} onAim={setAimX} onDanger={setDanger} onGameOver={handleGameOver} onFeedback={playFeedback} onCombo={setCombo} onMerge={handleMerge} onPlayerMove={handlePlayerMove} onPlayerDrop={handlePlayerDrop} onReady={handleEngineReady} paused={paused} />
-          {!engineReady && <div className="engine-loading" role="status"><span />正在准备果篮…</div>}
+          <OrchardGame key={runId} onScore={handleScore} onNext={setNext} onCurrent={setCurrent} onAim={setAimX} onDanger={setDanger} onGameOver={handleGameOver} onFeedback={playFeedback} onCombo={setCombo} onMerge={handleMerge} onPlayerMove={handlePlayerMove} onPlayerDrop={handlePlayerDrop} onReady={handleEngineReady} onLoadError={handleEngineLoadError} paused={paused} />
+          {!engineReady && !engineError && <div className="engine-loading" role="status"><span />正在准备果篮…</div>}
+          {engineError && (
+            <div className="engine-error" role="alert">
+              <strong>果篮加载失败</strong>
+              <span>请检查网络后重试</span>
+              <button onClick={retryEngine}>重新加载</button>
+            </div>
+          )}
           <img
             className="hanging-fruit"
             data-testid="current-fruit"
             style={{ "--aim-left": `${19 + aimX * (329 / 336) - 22}px` } as CSSProperties}
             src={fruitAsset(current)}
+            onError={fallbackToFruitAsset(current)}
             alt="当前水果"
           />
           <div className={`danger-line${danger ? " danger-line--active" : ""}`} aria-hidden="true" />
@@ -232,7 +257,7 @@ export default function Prototype() {
               <strong>x{combo.multiplier}</strong>
             </div>
           )}
-          <img className="wooden-bin" src={gameAsset("bin")} alt="" />
+          <img className="wooden-bin" src={gameAsset("bin")} onError={fallbackToGameAsset("bin")} alt="" />
           {paused && <button className="pause-overlay" onClick={() => setPaused(false)}>继续游戏</button>}
           {gameOverScore !== null && (
             <section className="game-over-panel" role="dialog" aria-label="本局结束">
@@ -261,7 +286,7 @@ export default function Prototype() {
         </section>
 
         <button className="instruction" onClick={() => setTutorialStep("intro")} aria-label="查看玩法说明">
-          <img src={gameAsset("instruction")} alt="" />
+          <img src={gameAsset("instruction")} onError={fallbackToGameAsset("instruction")} alt="" />
         </button>
         <p className="game-status" aria-live="polite">
           {gameOverScore !== null ? `本局结束，得分 ${gameOverScore}` : danger ? "水果接近危险线" : combo.count > 1 ? `${combo.count} 连击，${combo.multiplier} 倍得分` : `当前得分 ${score}`}

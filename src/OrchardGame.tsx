@@ -1,6 +1,6 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import type * as PhaserTypes from "phaser";
-import { fruitAsset } from "./gameAssets";
+import { resolveFruitAssets } from "./gameAssets";
 import { calculateMergeReward, COMBO_WINDOW_MS, getDifficultyProfile, pickStartLevel } from "./gameRules";
 import type { FeedbackKind } from "./useGameFeedback";
 
@@ -20,6 +20,24 @@ type GameBridge = {
   drop: () => void;
 };
 
+type OrchardDiagnostics = {
+  spawnMergePair: (level: number) => void;
+  spawnFruit: (level: number, x: number, y: number) => void;
+  snapshot: () => {
+    bodyCount: number;
+    invalidBodyCount: number;
+    outOfBoundsBodyCount: number;
+    pendingMergeCount: number;
+    score: number;
+  };
+};
+
+declare global {
+  interface Window {
+    __ORCHARD_DIAGNOSTICS__?: OrchardDiagnostics;
+  }
+}
+
 export type ComboState = {
   count: number;
   multiplier: number;
@@ -38,6 +56,7 @@ type OrchardGameProps = {
   onPlayerMove: () => void;
   onPlayerDrop: () => void;
   onReady: () => void;
+  onLoadError: (message: string) => void;
   paused: boolean;
 };
 
@@ -53,7 +72,7 @@ type PendingMerge = {
   velocityY: number;
 };
 
-export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, onFeedback, onCombo, onMerge, onPlayerMove, onPlayerDrop, onReady, paused }: OrchardGameProps) {
+export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGameOver, onFeedback, onCombo, onMerge, onPlayerMove, onPlayerDrop, onReady, onLoadError, paused }: OrchardGameProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const bridgeRef = useRef<GameBridge | null>(null);
 
@@ -64,8 +83,8 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     let game: PhaserTypes.Game | null = null;
 
     const boot = async () => {
-      // Phaser 占据绝大多数脚本体积，只在游戏画布真正挂载后异步下载独立分块。
-      const Phaser = await import("phaser");
+      // Phaser 和远端水果同时准备；任一 CDN 图片不可用时 resolveFruitAssets 会逐张回退本地资源。
+      const [Phaser, fruitSources] = await Promise.all([import("phaser"), resolveFruitAssets(FRUIT_COUNT)]);
       if (cancelled || !hostRef.current) return;
 
     let total = 0;
@@ -92,7 +111,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
 
       preload() {
         for (let level = 0; level < FRUIT_COUNT; level += 1) {
-          this.load.image(`fruit-${level}`, fruitAsset(level));
+          this.load.image(`fruit-${level}`, fruitSources[level]);
         }
       }
 
@@ -158,6 +177,41 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
           },
           drop: () => this.dropFruit(),
         };
+
+        if (import.meta.env.DEV) {
+          // 仅开发构建暴露真实 Matter 场景诊断口，用于长局合成和非法刚体自动化压测。
+          window.__ORCHARD_DIAGNOSTICS__ = {
+            spawnMergePair: (level) => {
+              const safeLevel = Phaser.Math.Clamp(Math.floor(level), 0, FRUIT_COUNT - 1);
+              const radius = RADII[safeLevel];
+              this.spawnFruit(168 - radius * 0.35, 235, safeLevel, false);
+              this.spawnFruit(168 + radius * 0.35, 235, safeLevel, false);
+            },
+            spawnFruit: (level, x, y) => {
+              const safeLevel = Phaser.Math.Clamp(Math.floor(level), 0, FRUIT_COUNT - 1);
+              this.spawnFruit(x, y, safeLevel, false);
+            },
+            snapshot: () => {
+              const bodies = this.matter.world.getAllBodies().filter((body) => !body.isStatic && body.gameObject);
+              return {
+                bodyCount: bodies.length,
+                invalidBodyCount: bodies.filter((body) => (
+                  !Number.isFinite(body.position.x)
+                  || !Number.isFinite(body.position.y)
+                  || !Number.isFinite(body.velocity.x)
+                  || !Number.isFinite(body.velocity.y)
+                )).length,
+                outOfBoundsBodyCount: bodies.filter((body) => (
+                  body.bounds.min.x < WORLD_LEFT - 1
+                  || body.bounds.max.x > WORLD_RIGHT + 1
+                  || body.bounds.max.y > WORLD_FLOOR + 1
+                )).length,
+                pendingMergeCount: pendingMerges.length + merging.size,
+                score: total,
+              };
+            },
+          };
+        }
         onReady();
 
       }
@@ -385,14 +439,20 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     });
     };
 
-    void boot();
+    void boot().catch((error: unknown) => {
+      if (!cancelled) {
+        const message = error instanceof Error ? error.message : "游戏引擎加载失败";
+        onLoadError(message);
+      }
+    });
 
     return () => {
       cancelled = true;
       bridgeRef.current = null;
+      delete window.__ORCHARD_DIAGNOSTICS__;
       game?.destroy(true);
     };
-  }, [onAim, onCombo, onCurrent, onDanger, onFeedback, onGameOver, onMerge, onNext, onPlayerDrop, onPlayerMove, onReady, onScore]);
+  }, [onAim, onCombo, onCurrent, onDanger, onFeedback, onGameOver, onLoadError, onMerge, onNext, onPlayerDrop, onPlayerMove, onReady, onScore]);
 
   useEffect(() => bridgeRef.current?.setPaused(paused), [paused]);
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -419,4 +479,3 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     />
   );
 }
-

@@ -49,6 +49,54 @@ test("投放后当前水果按预告队列推进", async ({ page }) => {
   await expect(page.getByTestId("current-fruit")).toHaveAttribute("src", /fruit-03\.png$/);
 });
 
+test("界面图片加载失败时只回退一次本地资源", async ({ page }) => {
+  const nextFruit = page.getByTestId("next-fruit");
+  await nextFruit.evaluate((image: HTMLImageElement) => {
+    image.src = "https://invalid.example/missing-fruit.webp";
+    image.dispatchEvent(new Event("error"));
+  });
+
+  await expect(nextFruit).toHaveAttribute("src", /\/assets\/game\/fruits\/fruit-03\.png$/);
+  await expect(nextFruit).toHaveAttribute("data-fallback-applied", "true");
+});
+
+test("长局连续清场合成后物理世界保持有限且无残留", async ({ page }) => {
+  await expect.poll(() => page.evaluate(() => Boolean(window.__ORCHARD_DIAGNOSTICS__))).toBe(true);
+
+  for (let index = 0; index < 40; index += 1) {
+    await page.evaluate(() => window.__ORCHARD_DIAGNOSTICS__?.spawnMergePair(10));
+    await page.waitForTimeout(55);
+  }
+
+  await expect.poll(
+    () => page.evaluate(() => window.__ORCHARD_DIAGNOSTICS__?.snapshot()),
+    { timeout: 5000 },
+  ).toMatchObject({
+    bodyCount: 0,
+    invalidBodyCount: 0,
+    outOfBoundsBodyCount: 0,
+    pendingMergeCount: 0,
+    score: 28500,
+  });
+});
+
+test("诊断投放会钳制极端坐标且不会穿过物理边界", async ({ page }) => {
+  await expect.poll(() => page.evaluate(() => Boolean(window.__ORCHARD_DIAGNOSTICS__))).toBe(true);
+  await page.evaluate(() => {
+    window.__ORCHARD_DIAGNOSTICS__?.spawnFruit(0, -10000, 210);
+    window.__ORCHARD_DIAGNOSTICS__?.spawnFruit(0, 10000, 210);
+  });
+  await page.waitForTimeout(250);
+
+  const snapshot = await page.evaluate(() => window.__ORCHARD_DIAGNOSTICS__?.snapshot());
+  expect(snapshot).toMatchObject({
+    bodyCount: 2,
+    invalidBodyCount: 0,
+    outOfBoundsBodyCount: 0,
+    pendingMergeCount: 0,
+  });
+});
+
 test("暂停、恢复和声音状态可交互", async ({ page }) => {
   const pause = page.getByRole("button", { name: "暂停游戏" });
   await pause.click();

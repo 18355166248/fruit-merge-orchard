@@ -37,7 +37,52 @@ export type GameAssetKey = keyof typeof LOCAL_ASSETS;
 
 // 开发环境使用本地资源保证离线调试；生产构建自动切到压缩后的 HTTPS CDN 资源。
 export const gameAsset = (key: GameAssetKey) => import.meta.env.DEV ? LOCAL_ASSETS[key] : CDN_ASSETS[key];
+export const localGameAsset = (key: GameAssetKey) => LOCAL_ASSETS[key];
+
 export const fruitAsset = (level: number) => {
   const name = `fruit-${String(level + 1).padStart(2, "0")}` as keyof typeof CDN_ASSETS;
   return import.meta.env.DEV ? `/assets/game/fruits/${name}.png` : CDN_ASSETS[name];
 };
+
+export const localFruitAsset = (level: number) => {
+  const name = `fruit-${String(level + 1).padStart(2, "0")}`;
+  return `/assets/game/fruits/${name}.png`;
+};
+
+export function applyImageFallback(image: HTMLImageElement, fallbackSrc: string) {
+  // 当前本地兜底也失败时停止重试；React 切换到下一张 CDN 图片后仍允许再次降级。
+  const absoluteFallback = new URL(fallbackSrc, window.location.href).href;
+  if (image.src === absoluteFallback) return;
+  image.dataset.fallbackApplied = "true";
+  image.src = fallbackSrc;
+}
+
+function canLoadImage(src: string, timeoutMs: number) {
+  return new Promise<boolean>((resolve) => {
+    const image = new Image();
+    let settled = false;
+    const finish = (available: boolean) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      image.onload = null;
+      image.onerror = null;
+      resolve(available);
+    };
+    const timeout = window.setTimeout(() => finish(false), timeoutMs);
+    image.onload = () => finish(true);
+    image.onerror = () => finish(false);
+    image.src = src;
+  });
+}
+
+export async function resolveFruitAssets(count: number, timeoutMs = 3500) {
+  const levels = Array.from({ length: count }, (_, level) => level);
+  if (import.meta.env.DEV) return levels.map(localFruitAsset);
+
+  // Phaser 的 Loader 遇到远端图片失败只会留下缺失纹理，因此启动前并行探测并逐张降级。
+  return Promise.all(levels.map(async (level) => {
+    const remote = fruitAsset(level);
+    return await canLoadImage(remote, timeoutMs) ? remote : localFruitAsset(level);
+  }));
+}
