@@ -91,7 +91,10 @@ test("BottomSheet remains mounted while its default exit animation plays", async
   await page.locator(".sheet-trigger").click();
   await expect(page.getByTestId("bottom-sheet")).toBeVisible();
 
-  await page.getByTestId("sheet-overlay").click({ position: { x: 8, y: 8 } });
+  const overlayBox = await page.getByTestId("sheet-overlay").boundingBox();
+  if (!overlayBox) throw new Error("Sheet overlay has no bounding box");
+  // 手机预览整体带缩放变换，直接按实际视口坐标点击可避免 locator position 的二次坐标换算误判。
+  await page.mouse.click(overlayBox.x + 8, overlayBox.y + 8);
   await expect(page.getByTestId("bottom-sheet")).toHaveCount(1);
   await page.waitForTimeout(500);
   await expect(page.getByTestId("bottom-sheet")).toHaveCount(0);

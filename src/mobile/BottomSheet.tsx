@@ -40,6 +40,9 @@ export function BottomSheet({
     onOpenChange(nextOpen);
   };
 
+  // Portal 位于设备屏幕内部，遮罩自身负责设备范围内的模态关闭，避免锁死整个预览页指针事件。
+  const handleOverlayPointerDown = () => handleOpenChange(false);
+
   const bindDrag = useDrag(
     (state) => {
       const [, movementY] = state.movement;
@@ -74,23 +77,23 @@ export function BottomSheet({
   const portalContainer = screenRef.current ?? undefined;
 
   return (
-    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
+    <Dialog.Root open={open} onOpenChange={handleOpenChange} modal={false}>
       {/* Keep the portal mounted after `open` flips so AnimatePresence can run
           the sheet and overlay exit animations before Radix removes them. */}
       <Dialog.Portal container={portalContainer} forceMount>
         <AnimatePresence>
           {open ? (
             <>
-              <Dialog.Overlay asChild forceMount>
-                <motion.div
-                  className="sheet-overlay"
-                  data-testid="sheet-overlay"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.16 }}
-                />
-              </Dialog.Overlay>
+              <motion.div
+                className="sheet-overlay"
+                data-testid="sheet-overlay"
+                aria-hidden="true"
+                onPointerDown={handleOverlayPointerDown}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.16 }}
+              />
               <Dialog.Content asChild forceMount>
                 <motion.div
                   className="bottom-sheet"

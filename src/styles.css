@@ -640,6 +640,8 @@ p {
   z-index: 20;
   inset: 0;
   background: rgba(0, 0, 0, 0.34);
+  /* Radix 会在模态打开时禁用页面指针事件，Portal 内遮罩需显式恢复以接收关闭点击。 */
+  pointer-events: auto;
 }
 
 .bottom-sheet {
