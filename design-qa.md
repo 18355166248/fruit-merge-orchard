@@ -110,4 +110,79 @@ prior game-screen result: passed
 - P1 resolved: career content is no longer a small scrollable dialog inside the playfield.
 - No remaining actionable P0, P1 or P2 visual mismatch was found in the final comparison.
 
+prior career-screen result: passed
+
+## HUD shortcut spacing QA
+
+**Evidence**
+
+- Source issue capture: `docs/hud-spacing-before.png` (377 × 254 px).
+- Browser-rendered implementation: `docs/hud-spacing-after.png` (1400 × 1200 px, DPR 1) with the
+  iPhone content viewport verified at 393 × 852 CSS pixels.
+- Combined focused comparison: `docs/hud-spacing-comparison.png`.
+- State: new game, score 0, top HUD and current fruit visible.
+
+**Findings and comparison history**
+
+1. Before fix — P1: `.career-control` left only 2px above `.score-card`, while `.settings-control`
+   overlapped `.next-card` by 9px. The shadows and label tabs visually merged.
+2. Fix: moved both shortcut controls from responsive y=116 to y=98, keeping their existing horizontal
+   anchors and artwork unchanged.
+3. After fix: iPhone gaps measure 20px (career → score) and 9px (settings → next); Pixel gaps measure
+   22px and 10px respectively. Horizontal clearance from the title sign remains at least 11px.
+
+**Required fidelity surfaces**
+
+- Typography, colors, assets and copy are unchanged from the selected orchard design.
+- Layout rhythm now separates the shortcut buttons from the HUD cards without moving the score, next-fruit
+  or playfield anchors.
+- No image resampling or new substitute icon was introduced.
+- iPhone and Pixel responsive states were visually inspected at the same game state.
+
+**Interactions and regression coverage**
+
+- Both shortcut buttons remain clickable and continue to open their full-screen panels.
+- The browser console produced no new warning or error on a fresh load.
+- Gameplay regression now asserts an 8px minimum shortcut-to-HUD gap for both device presets.
+
+No actionable P0/P1/P2 mismatch remains in the focused comparison.
+
+prior shortcut-to-HUD result: passed
+
+## Right-side control-stack QA
+
+**Evidence**
+
+- Source issue capture: `docs/hud-control-overlap-before.png` (402 × 173 px).
+- Browser-rendered implementation: `docs/hud-control-overlap-after.png` (1400 × 1200 px, DPR 1),
+  with the iPhone content viewport verified at 393 × 852 CSS pixels.
+- Combined focused comparison: `docs/hud-control-overlap-comparison.png` (1280 × 720 px).
+- State: new game, score 0, sound and pause enabled, top HUD visible.
+
+**Findings and comparison history**
+
+1. Before fix — P1: moving `.settings-control` upward solved its collision with `.next-card`, but its
+   rectangle then overlapped both `.sound-control` and `.pause-control`, creating ambiguous click targets.
+2. Fix: retained the settings and HUD anchors, reduced the two round controls to 34 × 36px on iPhone and
+   34 × 34px on Pixel, and placed them at each platform's safe top offset.
+3. After fix: the sound/pause row now ends at y=90 and settings begins at y=98 on iPhone; Pixel keeps an
+   8.4px gap. The settings-to-next gap remains at least 9px on both presets.
+
+**Required fidelity surfaces**
+
+- Typography, copy, palette, fruit imagery and source-derived control assets remain unchanged.
+- The round controls preserve their original aspect and visual hierarchy while no longer competing with
+  the text shortcut below.
+- No generated placeholder, CSS icon or substituted asset was introduced.
+- The full game composition and all playfield anchors remain unchanged.
+
+**Interactions and regression coverage**
+
+- Sound, pause and settings retain separate non-overlapping click rectangles.
+- Settings continues to open its full-screen panel; sound and pause retain their original actions.
+- The gameplay regression now enforces an 8px minimum round-control-to-settings gap on iPhone and Pixel.
+- `npm run check:runtime`, production build and all gameplay tests passed after the fix.
+
+No actionable P0/P1/P2 mismatch remains in the focused comparison.
+
 final result: passed

@@ -63,9 +63,82 @@ test("暂停、恢复和声音状态可交互", async ({ page }) => {
 });
 
 test("最高分会从本地记录恢复", async ({ page }) => {
-  await page.evaluate(() => localStorage.setItem("fruit-merge-orchard-best", "9126"));
+  await page.evaluate(() => {
+    localStorage.removeItem("fruit-merge-orchard:best:v2");
+    localStorage.setItem("fruit-merge-orchard-best", "9126");
+  });
   await page.reload();
   await expect(page.locator(".best-card strong")).toHaveText("9126");
+});
+
+test("新玩家最高分为零且旧版设计占位值不会污染记录", async ({ page }) => {
+  await expect(page.locator(".best-card strong")).toHaveText("0");
+  await page.evaluate(() => {
+    localStorage.removeItem("fruit-merge-orchard:best:v2");
+    localStorage.setItem("fruit-merge-orchard-best", "8723");
+  });
+  await page.reload();
+  await expect(page.locator(".best-card strong")).toHaveText("0");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("fruit-merge-orchard:best:v2"))).toBe("0");
+});
+
+test("设置中心全屏展示并分别持久化音效和振动", async ({ page }) => {
+  await page.getByRole("button", { name: "打开游戏设置" }).click();
+  const panel = page.getByRole("dialog", { name: "游戏设置" });
+  const sound = page.getByRole("switch", { name: "游戏音效" });
+  const haptics = page.getByRole("switch", { name: "振动反馈" });
+  await expect(panel).toBeVisible();
+  await expect(sound).toHaveAttribute("aria-checked", "true");
+  await expect(haptics).toHaveAttribute("aria-checked", "true");
+
+  const [panelBox, screenBox] = await Promise.all([panel.boundingBox(), page.getByTestId("device-screen").boundingBox()]);
+  if (!panelBox || !screenBox) throw new Error("设置全屏布局不可测量");
+  expect(panelBox.width).toBeCloseTo(screenBox.width, 0);
+  expect(panelBox.height).toBeGreaterThanOrEqual(screenBox.height - 1);
+
+  await sound.click();
+  await haptics.click();
+  await page.getByRole("button", { name: "关闭游戏设置" }).click();
+  await page.reload();
+  await expect(page.getByRole("button", { name: "开启声音" })).toBeVisible();
+  await page.getByRole("button", { name: "打开游戏设置" }).click();
+  await expect(page.getByRole("switch", { name: "振动反馈" })).toHaveAttribute("aria-checked", "false");
+});
+
+test("Pixel 下设置中心仍覆盖完整内容区", async ({ page }) => {
+  await page.getByTestId("device-picker").click();
+  await page.getByTestId("device-option-pixel-10").click();
+  await page.getByRole("button", { name: "打开游戏设置" }).click();
+  const panel = page.getByRole("dialog", { name: "游戏设置" });
+  const [panelBox, viewportBox] = await Promise.all([panel.boundingBox(), page.getByTestId("mobile-app-viewport").boundingBox()]);
+  if (!panelBox || !viewportBox) throw new Error("Pixel 设置全屏布局不可测量");
+  expect(panelBox.width).toBeCloseTo(viewportBox.width, 0);
+  // Android 的 48px 导航栏属于系统安全区，设置页只覆盖应用内容区。
+  expect(panelBox.height).toBeGreaterThanOrEqual(viewportBox.height - 1);
+  await expect(page.getByRole("button", { name: "清空生涯记录" })).toBeVisible();
+});
+
+test("清空生涯记录需要二次确认并同步重置最高分", async ({ page }) => {
+  await page.evaluate(() => {
+    localStorage.setItem("fruit-merge-orchard:best:v2", "640");
+    localStorage.setItem("fruit-merge-orchard:progress:v1", JSON.stringify({
+      gamesPlayed: 2,
+      totalScore: 640,
+      totalMerges: 18,
+      bestCombo: 3,
+      highestFruitLevel: 5,
+      unlocked: ["first-merge", "combo-3"],
+    }));
+  });
+  await page.reload();
+  await page.getByRole("button", { name: "打开游戏设置" }).click();
+  await page.getByRole("button", { name: "清空生涯记录" }).click();
+  await expect(page.getByRole("group", { name: "确认清空生涯记录" })).toBeVisible();
+  await page.getByRole("button", { name: "确认清空" }).click();
+  await page.getByRole("button", { name: "关闭游戏设置" }).click();
+  await expect(page.locator(".best-card strong")).toHaveText("0");
+  await page.getByRole("button", { name: "查看生涯与成就" }).click();
+  await expect(page.getByRole("dialog", { name: "生涯与成就" })).toContainText("已经完成 0 局");
 });
 
 test("生涯面板展示持久化统计和成就进度", async ({ page }) => {
@@ -128,13 +201,21 @@ test("iPhone 与 Pixel 下 HUD 均保持在屏幕内且互不遮挡", async ({ p
     const score = page.locator(".score-card");
     const best = page.locator(".best-card");
     const next = page.locator(".next-card");
-    const [screenBox, scoreBox, bestBox, nextBox] = await Promise.all([
+    const career = page.locator(".career-control");
+    const settings = page.locator(".settings-control");
+    const sound = page.locator(".sound-control");
+    const pause = page.locator(".pause-control");
+    const [screenBox, scoreBox, bestBox, nextBox, careerBox, settingsBox, soundBox, pauseBox] = await Promise.all([
       screen.boundingBox(),
       score.boundingBox(),
       best.boundingBox(),
       next.boundingBox(),
+      career.boundingBox(),
+      settings.boundingBox(),
+      sound.boundingBox(),
+      pause.boundingBox(),
     ]);
-    if (!screenBox || !scoreBox || !bestBox || !nextBox) throw new Error("HUD 布局不可测量");
+    if (!screenBox || !scoreBox || !bestBox || !nextBox || !careerBox || !settingsBox || !soundBox || !pauseBox) throw new Error("HUD 布局不可测量");
 
     for (const box of [scoreBox, bestBox, nextBox]) {
       expect(box.x).toBeGreaterThanOrEqual(screenBox.x);
@@ -142,5 +223,8 @@ test("iPhone 与 Pixel 下 HUD 均保持在屏幕内且互不遮挡", async ({ p
     }
     expect(await overlaps(score, next)).toBe(false);
     expect(await overlaps(best, next)).toBe(false);
+    expect(scoreBox.y - (careerBox.y + careerBox.height)).toBeGreaterThanOrEqual(8);
+    expect(nextBox.y - (settingsBox.y + settingsBox.height)).toBeGreaterThanOrEqual(8);
+    expect(settingsBox.y - Math.max(soundBox.y + soundBox.height, pauseBox.y + pauseBox.height)).toBeGreaterThanOrEqual(8);
   }
 });
