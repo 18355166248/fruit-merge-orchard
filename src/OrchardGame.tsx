@@ -82,6 +82,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     let cancelled = false;
     let game: PhaserTypes.Game | null = null;
     let removeGlobalReleaseListeners: (() => void) | null = null;
+    let dropCooldownTimer: number | null = null;
 
     const boot = async () => {
       // Phaser 和远端水果同时准备；任一 CDN 图片不可用时 resolveFruitAssets 会逐张回退本地资源。
@@ -199,6 +200,25 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
           // touchcancel 在 iOS 地址栏伸缩、系统手势竞争时很常见，不能把已完成的拖动吞掉。
           releaseDropGesture();
         };
+        const startsOnGameCanvas = (event: Event) => event.composedPath().includes(canvas);
+        const captureTouchStart = (event: TouchEvent) => {
+          if (!startsOnGameCanvas(event)) return;
+          onTouchStart(event);
+        };
+        const capturePointerDown = (event: PointerEvent) => {
+          if (!startsOnGameCanvas(event)) return;
+          onPointerDown(event);
+        };
+        // 捕获阶段先于 Phaser 的 canvas 监听器执行；Safari 即使在目标阶段截断事件，
+        // 第二次手势的开始与结束仍能被游戏自己的投放状态机完整接收。
+        document.addEventListener("pointerdown", capturePointerDown, { capture: true, passive: true });
+        document.addEventListener("pointermove", onPointerMove, { capture: true, passive: true });
+        document.addEventListener("pointerup", onPointerUp, { capture: true, passive: true });
+        document.addEventListener("pointercancel", onPointerCancel, { capture: true, passive: true });
+        document.addEventListener("touchstart", captureTouchStart, { capture: true, passive: true });
+        document.addEventListener("touchmove", onTouchMove, { capture: true, passive: true });
+        document.addEventListener("touchend", finishTouch, { capture: true, passive: true });
+        document.addEventListener("touchcancel", finishTouch, { capture: true, passive: true });
         canvas.addEventListener("pointerdown", onPointerDown, { passive: true });
         canvas.addEventListener("pointermove", onPointerMove, { passive: true });
         canvas.addEventListener("lostpointercapture", onLostPointerCapture, { passive: true });
@@ -209,6 +229,14 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         window.addEventListener("touchend", finishTouch, { passive: true });
         window.addEventListener("touchcancel", finishTouch, { passive: true });
         removeGlobalReleaseListeners = () => {
+          document.removeEventListener("pointerdown", capturePointerDown, true);
+          document.removeEventListener("pointermove", onPointerMove, true);
+          document.removeEventListener("pointerup", onPointerUp, true);
+          document.removeEventListener("pointercancel", onPointerCancel, true);
+          document.removeEventListener("touchstart", captureTouchStart, true);
+          document.removeEventListener("touchmove", onTouchMove, true);
+          document.removeEventListener("touchend", finishTouch, true);
+          document.removeEventListener("touchcancel", finishTouch, true);
           canvas.removeEventListener("pointerdown", onPointerDown);
           canvas.removeEventListener("pointermove", onPointerMove);
           canvas.removeEventListener("lostpointercapture", onLostPointerCapture);
@@ -462,10 +490,13 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         currentX = this.clampX(currentLevel, currentX);
         onAim(currentX);
         this.redrawGuide();
-        this.time.delayedCall(getDifficultyProfile(total).dropCooldownMs, () => {
+        if (dropCooldownTimer !== null) window.clearTimeout(dropCooldownTimer);
+        // 使用浏览器时钟解锁，避免 iOS Safari 触摸取消后 Phaser 场景时钟暂停而永久锁住下一颗。
+        dropCooldownTimer = window.setTimeout(() => {
+          dropCooldownTimer = null;
           canDrop = true;
           if (pendingDrop) this.dropFruit();
-        });
+        }, getDifficultyProfile(total).dropCooldownMs);
       }
 
       update() {
@@ -548,6 +579,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
       cancelled = true;
       bridgeRef.current = null;
       removeGlobalReleaseListeners?.();
+      if (dropCooldownTimer !== null) window.clearTimeout(dropCooldownTimer);
       delete window.__ORCHARD_DIAGNOSTICS__;
       game?.destroy(true);
     };
