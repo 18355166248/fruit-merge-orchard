@@ -38,7 +38,7 @@
   height: 852px;
   min-height: 852px;
   /* 物理世界保持 393×852 基准坐标，整层缩放可避免不同屏幕比例改变碰撞与落点。 */
-  --ui-scale: 1;
+  --ui-scale: 1px;
   transform: translate(-50%, -50%) scale(var(--game-scale, 1));
   transform-origin: center;
   overflow: hidden;
