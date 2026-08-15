@@ -299,7 +299,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
 
         bridgeRef.current = {
           setPaused: (value) => {
-            if (!value) this.game.loop.wake();
+            if (!value) this.restartRuntimeLoop();
             this.matter.world.enabled = !value;
             this.input.enabled = !value;
             // 暂停时冻结连击窗口和反馈动画，恢复后仍延续玩家暂停前的局面。
@@ -491,11 +491,20 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         return pickStartLevel(Phaser.Math.Between(1, 100), profile.levelThresholds);
       }
 
+      restartRuntimeLoop() {
+        // iOS Safari 偶发停止 RAF，但 Phaser 的 running 标志仍为 true，单纯 wake 会直接返回。
+        // 强制重建 RAF，并同步恢复 Game 与 TimeStep，确保 Matter 下一帧继续计算。
+        this.game.resume();
+        this.game.loop.resume();
+        this.game.loop.sleep();
+        this.game.loop.wake(true);
+      }
+
       dropFruit() {
         if (isGameOver) return;
         // iOS Safari 从 pagehide/visibilitychange 返回时，React 的暂停按钮可能已恢复，
         // 但 Matter 世界仍保留禁用态。有效画布手势发生时统一校准运行状态，避免水果停在半空。
-        this.game.loop.wake();
+        this.restartRuntimeLoop();
         this.matter.world.enabled = true;
         this.input.enabled = true;
         this.time.paused = false;
