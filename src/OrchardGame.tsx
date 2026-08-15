@@ -81,6 +81,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
 
     let cancelled = false;
     let game: PhaserTypes.Game | null = null;
+    let removeGlobalReleaseListeners: (() => void) | null = null;
 
     const boot = async () => {
       // Phaser 和远端水果同时准备；任一 CDN 图片不可用时 resolveFruitAssets 会逐张回退本地资源。
@@ -98,6 +99,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     let comboCount = 0;
     let lastMergeAt = Number.NEGATIVE_INFINITY;
     let comboResetEvent: PhaserTypes.Time.TimerEvent | null = null;
+    let activeDropGesture = false;
     let guide: PhaserTypes.GameObjects.Graphics;
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const merging = new Set<number>();
@@ -123,13 +125,35 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         guide = this.add.graphics().setDepth(1);
         this.redrawGuide();
 
+        this.input.on("pointerdown", () => {
+          activeDropGesture = true;
+        });
         this.input.on("pointermove", (pointer: PhaserTypes.Input.Pointer) => {
           currentX = this.clampX(currentLevel, pointer.x);
           onAim(currentX);
           if (pointer.isDown) onPlayerMove();
           this.redrawGuide();
         });
-        this.input.on("pointerup", () => this.dropFruit());
+        const releaseDropGesture = () => {
+          if (!activeDropGesture) return;
+          activeDropGesture = false;
+          this.dropFruit();
+        };
+        const cancelDropGesture = () => { activeDropGesture = false; };
+        this.input.on("pointerup", releaseDropGesture);
+        this.input.on("pointerupoutside", releaseDropGesture);
+        // iOS Safari 在手指越过 canvas 边界后可能不把 pointerup 交还 Phaser；
+        // 用窗口级释放兜底，但只响应从游戏画布开始的手势，避免点击页面按钮误投放。
+        window.addEventListener("pointerup", releaseDropGesture, { passive: true });
+        window.addEventListener("touchend", releaseDropGesture, { passive: true });
+        window.addEventListener("pointercancel", cancelDropGesture, { passive: true });
+        window.addEventListener("touchcancel", cancelDropGesture, { passive: true });
+        removeGlobalReleaseListeners = () => {
+          window.removeEventListener("pointerup", releaseDropGesture);
+          window.removeEventListener("touchend", releaseDropGesture);
+          window.removeEventListener("pointercancel", cancelDropGesture);
+          window.removeEventListener("touchcancel", cancelDropGesture);
+        };
 
         // 碰撞回调只登记合成，下一拍统一落账，避免遍历碰撞对时直接销毁 body。
         this.matter.world.on("collisionstart", (event: PhaserTypes.Physics.Matter.Events.CollisionStartEvent) => {
@@ -449,6 +473,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     return () => {
       cancelled = true;
       bridgeRef.current = null;
+      removeGlobalReleaseListeners?.();
       delete window.__ORCHARD_DIAGNOSTICS__;
       game?.destroy(true);
     };

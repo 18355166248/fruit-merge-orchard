@@ -49,6 +49,19 @@ test("投放后当前水果按预告队列推进", async ({ page }) => {
   await expect(page.getByTestId("current-fruit")).toHaveAttribute("src", /fruit-03\.png$/);
 });
 
+test("拖动离开画布后松手仍会投放水果", async ({ page }) => {
+  const canvas = page.locator(".physics-canvas canvas");
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error("游戏画布没有可用边界");
+
+  await page.mouse.move(box.x + box.width / 2, box.y + 70);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width + 24, box.y + 120, { steps: 4 });
+  await page.mouse.up();
+
+  await expect(page.getByTestId("current-fruit")).toHaveAttribute("src", /fruit-03\.png$/);
+});
+
 test("界面图片加载失败时只回退一次本地资源", async ({ page }) => {
   const nextFruit = page.getByTestId("next-fruit");
   await nextFruit.evaluate((image: HTMLImageElement) => {
