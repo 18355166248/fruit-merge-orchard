@@ -71,8 +71,9 @@ test("连续投放会缓冲一颗且无需等待水果落地", async ({ page }) 
     const rect = element.getBoundingClientRect();
     for (let index = 0; index < 12; index += 1) {
       const clientX = rect.left + 150 + (index % 3) * 20;
-      element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, clientX, clientY: rect.top + 80 }));
-      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, button: 0, clientX, clientY: rect.top + 80 }));
+      const pointerId = 100 + index;
+      element.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId, isPrimary: true, button: 0, clientX, clientY: rect.top + 80 }));
+      document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId, isPrimary: true, button: 0, clientX, clientY: rect.top + 80 }));
     }
   });
 
@@ -108,7 +109,7 @@ test("iOS 以 pointercancel 结束拖动后可快速继续投放", async ({ page
       clientY: box.y + 80,
     });
     await page.evaluate((id) => {
-      window.dispatchEvent(new PointerEvent("pointercancel", { pointerId: id, isPrimary: true }));
+      document.dispatchEvent(new PointerEvent("pointercancel", { pointerId: id, isPrimary: true }));
     }, pointerId);
     if (pointerId === 71) await page.waitForTimeout(160);
   }
@@ -119,20 +120,22 @@ test("iOS 以 pointercancel 结束拖动后可快速继续投放", async ({ page
   ).toBe(2);
 });
 
-test("Safari 仅发送传统 mouse 事件时松手仍会投放", async ({ page }) => {
+test("Safari Pointer Events 松手会完成投放", async ({ page }) => {
   const canvas = page.locator(".physics-canvas canvas");
   const box = await canvas.boundingBox();
   if (!box) throw new Error("游戏画布没有可用边界");
   await expect.poll(() => page.evaluate(() => Boolean(window.__ORCHARD_DIAGNOSTICS__))).toBe(true);
 
-  await canvas.dispatchEvent("mousedown", {
+  await canvas.dispatchEvent("pointerdown", {
+    pointerId: 81,
+    isPrimary: true,
     button: 0,
     clientX: box.x + box.width / 2,
     clientY: box.y + 80,
   });
   await page.evaluate(({ clientX, clientY }) => {
-    document.dispatchEvent(new MouseEvent("mousemove", { button: 0, clientX, clientY }));
-    document.dispatchEvent(new MouseEvent("mouseup", { button: -1, clientX, clientY }));
+    document.dispatchEvent(new PointerEvent("pointermove", { pointerId: 81, isPrimary: true, button: 0, clientX, clientY }));
+    document.dispatchEvent(new PointerEvent("pointerup", { pointerId: 81, isPrimary: true, button: 0, clientX, clientY }));
   }, { clientX: box.x + box.width * 0.72, clientY: box.y + 120 });
 
   await expect.poll(

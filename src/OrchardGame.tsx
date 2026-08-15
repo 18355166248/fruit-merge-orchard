@@ -133,29 +133,13 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         guide = this.add.graphics().setDepth(1);
         this.redrawGuide();
 
-        this.input.on("pointerdown", () => {
-          activeDropGesture = true;
-        });
-        this.input.on("pointermove", (pointer: PhaserTypes.Input.Pointer) => {
-          currentX = this.clampX(currentLevel, pointer.x);
-          onAim(currentX);
-          if (pointer.isDown) onPlayerMove();
-          this.redrawGuide();
-        });
         let activePointerId: number | null = null;
-        let activeTouchId: number | null = null;
-        let activeMouseGesture = false;
-        const commitDropGesture = (trackedSource = false) => {
-          if (!trackedSource && !activeDropGesture) return;
+        const commitDropGesture = () => {
+          if (!activeDropGesture) return;
           activeDropGesture = false;
-          // 一套兼容事件完成投放后立即清空其他来源，避免 Safari 随后的合成事件重复投放。
           activePointerId = null;
-          activeTouchId = null;
-          activeMouseGesture = false;
           this.dropFruit();
         };
-        this.input.on("pointerup", () => commitDropGesture());
-        this.input.on("pointerupoutside", () => commitDropGesture());
 
         const canvas = this.game.canvas;
         const updateAimFromClientX = (clientX: number) => {
@@ -179,101 +163,34 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         };
         const onPointerUp = (event: PointerEvent) => {
           if (activePointerId !== event.pointerId) return;
-          commitDropGesture(true);
+          commitDropGesture();
         };
         const onPointerCancel = (event: PointerEvent) => {
           if (activePointerId !== event.pointerId) return;
           // Safari 把拖动升级为系统手势时会用 cancel 结束触点；对投放玩法它同样代表松手。
-          commitDropGesture(true);
+          commitDropGesture();
         };
         const onLostPointerCapture = (event: PointerEvent) => {
           if (activePointerId !== event.pointerId) return;
-          commitDropGesture(true);
-        };
-        const onTouchStart = (event: TouchEvent) => {
-          const touch = event.changedTouches[0];
-          if (!touch) return;
-          activeTouchId = touch.identifier;
-          activeDropGesture = true;
-          updateAimFromClientX(touch.clientX);
-        };
-        const onTouchMove = (event: TouchEvent) => {
-          const touch = Array.from(event.touches).find(item => item.identifier === activeTouchId);
-          if (touch) updateAimFromClientX(touch.clientX);
-        };
-        const finishTouch = (event: TouchEvent) => {
-          const ended = Array.from(event.changedTouches).some(item => item.identifier === activeTouchId);
-          if (!ended) return;
-          // touchcancel 在 iOS 地址栏伸缩、系统手势竞争时很常见，不能把已完成的拖动吞掉。
-          commitDropGesture(true);
+          commitDropGesture();
         };
         const startsOnGameCanvas = (event: Event) => event.composedPath().includes(canvas);
-        const captureTouchStart = (event: TouchEvent) => {
-          if (!startsOnGameCanvas(event)) return;
-          onTouchStart(event);
-        };
         const capturePointerDown = (event: PointerEvent) => {
           if (!startsOnGameCanvas(event)) return;
           onPointerDown(event);
         };
-        const captureMouseDown = (event: MouseEvent) => {
-          if (event.button !== 0 || !startsOnGameCanvas(event)) return;
-          activeMouseGesture = true;
-          activeDropGesture = true;
-          updateAimFromClientX(event.clientX);
-        };
-        const captureMouseMove = (event: MouseEvent) => {
-          if (activeMouseGesture) updateAimFromClientX(event.clientX);
-        };
-        const captureMouseUp = () => {
-          if (!activeMouseGesture) return;
-          // Safari 合成的 mouseup 可能把 button 置为 -1；开始已确认是左键，本次结束不能再次按 button 过滤。
-          commitDropGesture(true);
-        };
-        // 捕获阶段先于 Phaser 的 canvas 监听器执行；Safari 即使在目标阶段截断事件，
-        // 第二次手势的开始与结束仍能被游戏自己的投放状态机完整接收。
+        // 现代 Safari 同时合成 pointer、touch、mouse 事件；只监听 Pointer Events，避免一次手势重复跑多套状态机。
         document.addEventListener("pointerdown", capturePointerDown, { capture: true, passive: true });
         document.addEventListener("pointermove", onPointerMove, { capture: true, passive: true });
         document.addEventListener("pointerup", onPointerUp, { capture: true, passive: true });
         document.addEventListener("pointercancel", onPointerCancel, { capture: true, passive: true });
-        document.addEventListener("touchstart", captureTouchStart, { capture: true, passive: true });
-        document.addEventListener("touchmove", onTouchMove, { capture: true, passive: true });
-        document.addEventListener("touchend", finishTouch, { capture: true, passive: true });
-        document.addEventListener("touchcancel", finishTouch, { capture: true, passive: true });
-        // macOS Safari 的拖动链路可能只保留传统 mouse 事件；显式覆盖才能保证松手落下。
-        document.addEventListener("mousedown", captureMouseDown, { capture: true, passive: true });
-        document.addEventListener("mousemove", captureMouseMove, { capture: true, passive: true });
-        document.addEventListener("mouseup", captureMouseUp, { capture: true, passive: true });
-        canvas.addEventListener("pointerdown", onPointerDown, { passive: true });
-        canvas.addEventListener("pointermove", onPointerMove, { passive: true });
         canvas.addEventListener("lostpointercapture", onLostPointerCapture, { passive: true });
-        canvas.addEventListener("touchstart", onTouchStart, { passive: true });
-        canvas.addEventListener("touchmove", onTouchMove, { passive: true });
-        window.addEventListener("pointerup", onPointerUp, { passive: true });
-        window.addEventListener("pointercancel", onPointerCancel, { passive: true });
-        window.addEventListener("touchend", finishTouch, { passive: true });
-        window.addEventListener("touchcancel", finishTouch, { passive: true });
         removeGlobalReleaseListeners = () => {
           document.removeEventListener("pointerdown", capturePointerDown, true);
           document.removeEventListener("pointermove", onPointerMove, true);
           document.removeEventListener("pointerup", onPointerUp, true);
           document.removeEventListener("pointercancel", onPointerCancel, true);
-          document.removeEventListener("touchstart", captureTouchStart, true);
-          document.removeEventListener("touchmove", onTouchMove, true);
-          document.removeEventListener("touchend", finishTouch, true);
-          document.removeEventListener("touchcancel", finishTouch, true);
-          document.removeEventListener("mousedown", captureMouseDown, true);
-          document.removeEventListener("mousemove", captureMouseMove, true);
-          document.removeEventListener("mouseup", captureMouseUp, true);
-          canvas.removeEventListener("pointerdown", onPointerDown);
-          canvas.removeEventListener("pointermove", onPointerMove);
           canvas.removeEventListener("lostpointercapture", onLostPointerCapture);
-          canvas.removeEventListener("touchstart", onTouchStart);
-          canvas.removeEventListener("touchmove", onTouchMove);
-          window.removeEventListener("pointerup", onPointerUp);
-          window.removeEventListener("pointercancel", onPointerCancel);
-          window.removeEventListener("touchend", finishTouch);
-          window.removeEventListener("touchcancel", finishTouch);
         };
 
         // 碰撞回调只登记合成，下一拍统一落账，避免遍历碰撞对时直接销毁 body。
@@ -430,8 +347,8 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         }
 
         // 碎光复用真实水果贴图且不创建 Matter body，视觉反馈不会改变堆叠结构。
-        for (let index = 0; index < 7; index += 1) {
-          const angle = (Math.PI * 2 * index) / 7 - Math.PI / 2;
+        for (let index = 0; index < 4; index += 1) {
+          const angle = (Math.PI * 2 * index) / 4 - Math.PI / 2;
           const distance = 24 + (index % 3) * 7;
           const sparkle = this.add.image(x, y, `fruit-${safeLevel}`).setDisplaySize(11, 11).setAlpha(0.82).setDepth(7);
           this.tweens.add({
@@ -606,9 +523,9 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         matter: {
           debug: false,
           gravity: { x: 0, y: 1.08 },
-          positionIterations: 10,
-          velocityIterations: 8,
-          constraintIterations: 4,
+          positionIterations: 6,
+          velocityIterations: 4,
+          constraintIterations: 2,
           enableSleeping: true,
         },
       },
