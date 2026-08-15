@@ -100,6 +100,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     let lastMergeAt = Number.NEGATIVE_INFINITY;
     let comboResetEvent: PhaserTypes.Time.TimerEvent | null = null;
     let activeDropGesture = false;
+    let pendingDrop = false;
     let guide: PhaserTypes.GameObjects.Graphics;
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const merging = new Set<number>();
@@ -142,17 +143,47 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         const cancelDropGesture = () => { activeDropGesture = false; };
         this.input.on("pointerup", releaseDropGesture);
         this.input.on("pointerupoutside", releaseDropGesture);
-        // iOS Safari 在手指越过 canvas 边界后可能不把 pointerup 交还 Phaser；
-        // 用窗口级释放兜底，但只响应从游戏画布开始的手势，避免点击页面按钮误投放。
-        window.addEventListener("pointerup", releaseDropGesture, { passive: true });
-        window.addEventListener("touchend", releaseDropGesture, { passive: true });
-        window.addEventListener("pointercancel", cancelDropGesture, { passive: true });
-        window.addEventListener("touchcancel", cancelDropGesture, { passive: true });
+
+        const canvas = this.game.canvas;
+        const updateAimFromClientX = (clientX: number) => {
+          const rect = canvas.getBoundingClientRect();
+          if (rect.width <= 0) return;
+          currentX = this.clampX(currentLevel, ((clientX - rect.left) / rect.width) * 336);
+          onAim(currentX);
+          onPlayerMove();
+          this.redrawGuide();
+        };
+        let activePointerId: number | null = null;
+        const onPointerDown = (event: PointerEvent) => {
+          if (!event.isPrimary || event.button !== 0) return;
+          activePointerId = event.pointerId;
+          activeDropGesture = true;
+          updateAimFromClientX(event.clientX);
+          // 捕获后即使手指越过 canvas，Safari 也必须把本次 move/up 继续交给同一画布。
+          try { canvas.setPointerCapture(event.pointerId); } catch { /* 旧版 Safari 走窗口兜底。 */ }
+        };
+        const onPointerMove = (event: PointerEvent) => {
+          if (activePointerId === event.pointerId) updateAimFromClientX(event.clientX);
+        };
+        const onPointerUp = (event: PointerEvent) => {
+          if (activePointerId !== event.pointerId) return;
+          activePointerId = null;
+          releaseDropGesture();
+        };
+        const onPointerCancel = (event: PointerEvent) => {
+          if (activePointerId !== event.pointerId) return;
+          activePointerId = null;
+          cancelDropGesture();
+        };
+        canvas.addEventListener("pointerdown", onPointerDown, { passive: true });
+        canvas.addEventListener("pointermove", onPointerMove, { passive: true });
+        window.addEventListener("pointerup", onPointerUp, { passive: true });
+        window.addEventListener("pointercancel", onPointerCancel, { passive: true });
         removeGlobalReleaseListeners = () => {
-          window.removeEventListener("pointerup", releaseDropGesture);
-          window.removeEventListener("touchend", releaseDropGesture);
-          window.removeEventListener("pointercancel", cancelDropGesture);
-          window.removeEventListener("touchcancel", cancelDropGesture);
+          canvas.removeEventListener("pointerdown", onPointerDown);
+          canvas.removeEventListener("pointermove", onPointerMove);
+          window.removeEventListener("pointerup", onPointerUp);
+          window.removeEventListener("pointercancel", onPointerCancel);
         };
 
         // 碰撞回调只登记合成，下一拍统一落账，避免遍历碰撞对时直接销毁 body。
@@ -379,7 +410,13 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
       }
 
       dropFruit() {
-        if (!canDrop || isGameOver) return;
+        if (isGameOver) return;
+        // 玩家在上一颗的短冷却内已经完成第二次松手时，记住这次投放并在解锁后立即执行。
+        if (!canDrop) {
+          pendingDrop = true;
+          return;
+        }
+        pendingDrop = false;
         canDrop = false;
         this.spawnFruit(this.clampX(currentLevel, currentX), 36, currentLevel, false);
         onFeedback("drop", currentLevel);
@@ -391,7 +428,10 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         currentX = this.clampX(currentLevel, currentX);
         onAim(currentX);
         this.redrawGuide();
-        this.time.delayedCall(getDifficultyProfile(total).dropCooldownMs, () => { canDrop = true; });
+        this.time.delayedCall(getDifficultyProfile(total).dropCooldownMs, () => {
+          canDrop = true;
+          if (pendingDrop) this.dropFruit();
+        });
       }
 
       update() {

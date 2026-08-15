@@ -62,6 +62,19 @@ test("拖动离开画布后松手仍会投放水果", async ({ page }) => {
   await expect(page.getByTestId("current-fruit")).toHaveAttribute("src", /fruit-03\.png$/);
 });
 
+test("连续两次快速松手不会丢失第二次投放", async ({ page }) => {
+  const canvas = page.locator(".physics-canvas canvas");
+  await expect.poll(() => page.evaluate(() => Boolean(window.__ORCHARD_DIAGNOSTICS__))).toBe(true);
+
+  await canvas.click({ position: { x: 150, y: 80 } });
+  await canvas.click({ position: { x: 190, y: 80 } });
+
+  await expect.poll(
+    () => page.evaluate(() => window.__ORCHARD_DIAGNOSTICS__?.snapshot().bodyCount),
+    { timeout: 2500 },
+  ).toBe(2);
+});
+
 test("界面图片加载失败时只回退一次本地资源", async ({ page }) => {
   const nextFruit = page.getByTestId("next-fruit");
   await nextFruit.evaluate((image: HTMLImageElement) => {
