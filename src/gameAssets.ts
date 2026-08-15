@@ -35,11 +35,18 @@ const LOCAL_ASSETS = {
 
 export type GameAssetKey = keyof typeof LOCAL_ASSETS;
 
+const resolvedGameAssets = new Map<GameAssetKey, string>();
+const resolvedFruitAssets = new Map<number, string>();
+let preloadPromise: Promise<void> | null = null;
+
 // 开发环境使用本地资源保证离线调试；生产构建自动切到压缩后的 HTTPS CDN 资源。
-export const gameAsset = (key: GameAssetKey) => import.meta.env.DEV ? LOCAL_ASSETS[key] : CDN_ASSETS[key];
+export const gameAsset = (key: GameAssetKey) => resolvedGameAssets.get(key)
+  ?? (import.meta.env.DEV ? LOCAL_ASSETS[key] : CDN_ASSETS[key]);
 export const localGameAsset = (key: GameAssetKey) => LOCAL_ASSETS[key];
 
 export const fruitAsset = (level: number) => {
+  const resolved = resolvedFruitAssets.get(level);
+  if (resolved) return resolved;
   const name = `fruit-${String(level + 1).padStart(2, "0")}` as keyof typeof CDN_ASSETS;
   return import.meta.env.DEV ? `/assets/game/fruits/${name}.png` : CDN_ASSETS[name];
 };
@@ -70,14 +77,64 @@ function canLoadImage(src: string, timeoutMs: number) {
       resolve(available);
     };
     const timeout = window.setTimeout(() => finish(false), timeoutMs);
-    image.onload = () => finish(true);
+    image.onload = () => {
+      // load 只保证字节到达；decode 完成后首帧绘制才不会出现透明占位。
+      if (typeof image.decode === "function") {
+        void image.decode().then(() => finish(true), () => finish(true));
+      } else {
+        finish(true);
+      }
+    };
     image.onerror = () => finish(false);
     image.src = src;
   });
 }
 
+async function resolveImage(remote: string, fallback: string, timeoutMs: number) {
+  if (import.meta.env.DEV) {
+    await canLoadImage(fallback, timeoutMs);
+    return fallback;
+  }
+  if (await canLoadImage(remote, timeoutMs)) return remote;
+  await canLoadImage(fallback, timeoutMs);
+  return fallback;
+}
+
+export function preloadGameAssets(
+  onProgress: (completed: number, total: number) => void,
+  fruitCount = 11,
+  timeoutMs = 8000,
+) {
+  if (preloadPromise) return preloadPromise;
+
+  const gameKeys = Object.keys(LOCAL_ASSETS) as GameAssetKey[];
+  const total = gameKeys.length + fruitCount;
+  let completed = 0;
+  onProgress(0, total);
+  const tick = () => onProgress(++completed, total);
+
+  // 首屏所用 UI 与全部水果统一解码并写入解析缓存；组件挂载后只读已就绪的 URL。
+  preloadPromise = Promise.all([
+    ...gameKeys.map(async (key) => {
+      const source = await resolveImage(CDN_ASSETS[key], LOCAL_ASSETS[key], timeoutMs);
+      resolvedGameAssets.set(key, source);
+      tick();
+    }),
+    ...Array.from({ length: fruitCount }, async (_, level) => {
+      const name = `fruit-${String(level + 1).padStart(2, "0")}` as keyof typeof CDN_ASSETS;
+      const source = await resolveImage(CDN_ASSETS[name], localFruitAsset(level), timeoutMs);
+      resolvedFruitAssets.set(level, source);
+      tick();
+    }),
+  ]).then(() => undefined);
+  return preloadPromise;
+}
+
 export async function resolveFruitAssets(count: number, timeoutMs = 3500) {
   const levels = Array.from({ length: count }, (_, level) => level);
+  if (levels.every((level) => resolvedFruitAssets.has(level))) {
+    return levels.map((level) => resolvedFruitAssets.get(level)!);
+  }
   if (import.meta.env.DEV) return levels.map(localFruitAsset);
 
   // Phaser 的 Loader 遇到远端图片失败只会留下缺失纹理，因此启动前并行探测并逐张降级。
