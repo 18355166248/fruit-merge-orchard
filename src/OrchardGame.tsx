@@ -140,7 +140,6 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
           activeDropGesture = false;
           this.dropFruit();
         };
-        const cancelDropGesture = () => { activeDropGesture = false; };
         this.input.on("pointerup", releaseDropGesture);
         this.input.on("pointerupoutside", releaseDropGesture);
 
@@ -173,17 +172,52 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         const onPointerCancel = (event: PointerEvent) => {
           if (activePointerId !== event.pointerId) return;
           activePointerId = null;
-          cancelDropGesture();
+          // Safari 把拖动升级为系统手势时会用 cancel 结束触点；对投放玩法它同样代表松手。
+          releaseDropGesture();
+        };
+        const onLostPointerCapture = (event: PointerEvent) => {
+          if (activePointerId !== event.pointerId) return;
+          activePointerId = null;
+          releaseDropGesture();
+        };
+        let activeTouchId: number | null = null;
+        const onTouchStart = (event: TouchEvent) => {
+          const touch = event.changedTouches[0];
+          if (!touch) return;
+          activeTouchId = touch.identifier;
+          activeDropGesture = true;
+          updateAimFromClientX(touch.clientX);
+        };
+        const onTouchMove = (event: TouchEvent) => {
+          const touch = Array.from(event.touches).find(item => item.identifier === activeTouchId);
+          if (touch) updateAimFromClientX(touch.clientX);
+        };
+        const finishTouch = (event: TouchEvent) => {
+          const ended = Array.from(event.changedTouches).some(item => item.identifier === activeTouchId);
+          if (!ended) return;
+          activeTouchId = null;
+          // touchcancel 在 iOS 地址栏伸缩、系统手势竞争时很常见，不能把已完成的拖动吞掉。
+          releaseDropGesture();
         };
         canvas.addEventListener("pointerdown", onPointerDown, { passive: true });
         canvas.addEventListener("pointermove", onPointerMove, { passive: true });
+        canvas.addEventListener("lostpointercapture", onLostPointerCapture, { passive: true });
+        canvas.addEventListener("touchstart", onTouchStart, { passive: true });
+        canvas.addEventListener("touchmove", onTouchMove, { passive: true });
         window.addEventListener("pointerup", onPointerUp, { passive: true });
         window.addEventListener("pointercancel", onPointerCancel, { passive: true });
+        window.addEventListener("touchend", finishTouch, { passive: true });
+        window.addEventListener("touchcancel", finishTouch, { passive: true });
         removeGlobalReleaseListeners = () => {
           canvas.removeEventListener("pointerdown", onPointerDown);
           canvas.removeEventListener("pointermove", onPointerMove);
+          canvas.removeEventListener("lostpointercapture", onLostPointerCapture);
+          canvas.removeEventListener("touchstart", onTouchStart);
+          canvas.removeEventListener("touchmove", onTouchMove);
           window.removeEventListener("pointerup", onPointerUp);
           window.removeEventListener("pointercancel", onPointerCancel);
+          window.removeEventListener("touchend", finishTouch);
+          window.removeEventListener("touchcancel", finishTouch);
         };
 
         // 碰撞回调只登记合成，下一拍统一落账，避免遍历碰撞对时直接销毁 body。

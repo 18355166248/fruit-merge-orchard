@@ -75,6 +75,31 @@ test("连续两次快速松手不会丢失第二次投放", async ({ page }) => 
   ).toBe(2);
 });
 
+test("iOS 以 pointercancel 结束拖动后仍可连续投放", async ({ page }) => {
+  const canvas = page.locator(".physics-canvas canvas");
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error("游戏画布没有可用边界");
+  await expect.poll(() => page.evaluate(() => Boolean(window.__ORCHARD_DIAGNOSTICS__))).toBe(true);
+
+  for (const pointerId of [71, 72]) {
+    await canvas.dispatchEvent("pointerdown", {
+      pointerId,
+      isPrimary: true,
+      button: 0,
+      clientX: box.x + box.width / 2,
+      clientY: box.y + 80,
+    });
+    await page.evaluate((id) => {
+      window.dispatchEvent(new PointerEvent("pointercancel", { pointerId: id, isPrimary: true }));
+    }, pointerId);
+  }
+
+  await expect.poll(
+    () => page.evaluate(() => window.__ORCHARD_DIAGNOSTICS__?.snapshot().bodyCount),
+    { timeout: 2500 },
+  ).toBe(2);
+});
+
 test("界面图片加载失败时只回退一次本地资源", async ({ page }) => {
   const nextFruit = page.getByTestId("next-fruit");
   await nextFruit.evaluate((image: HTMLImageElement) => {
