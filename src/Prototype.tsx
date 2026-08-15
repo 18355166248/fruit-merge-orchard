@@ -95,22 +95,6 @@ export default function Prototype() {
   }, [newAchievement]);
 
   useEffect(() => {
-    const pauseForBackground = () => {
-      // 返回游戏时不自动恢复，避免玩家还没准备好就继续计算物理和危险线倒计时。
-      if (gameOverScore === null) setPaused(true);
-    };
-    const handleVisibility = () => {
-      if (document.hidden) pauseForBackground();
-    };
-    document.addEventListener("visibilitychange", handleVisibility);
-    window.addEventListener("pagehide", pauseForBackground);
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibility);
-      window.removeEventListener("pagehide", pauseForBackground);
-    };
-  }, [gameOverScore]);
-
-  useEffect(() => {
     if (tutorialStep !== "complete") return;
     try {
       window.localStorage.setItem(TUTORIAL_SEEN_KEY, "true");

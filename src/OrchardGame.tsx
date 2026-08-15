@@ -82,8 +82,6 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     let cancelled = false;
     let game: PhaserTypes.Game | null = null;
     let removeGlobalReleaseListeners: (() => void) | null = null;
-    let dropCooldownTimer: number | null = null;
-    let dropUnlockAt = 0;
 
     const boot = async () => {
       // Phaser 和远端水果同时准备；任一 CDN 图片不可用时 resolveFruitAssets 会逐张回退本地资源。
@@ -94,7 +92,6 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     let nextLevel = 2;
     let currentLevel = 3;
     let currentX = 168;
-    let canDrop = true;
     let isGameOver = false;
     let mergeFlushScheduled = false;
     let dangerActive = false;
@@ -102,7 +99,6 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     let lastMergeAt = Number.NEGATIVE_INFINITY;
     let comboResetEvent: PhaserTypes.Time.TimerEvent | null = null;
     let activeDropGesture = false;
-    let pendingDrop = false;
     let guide: PhaserTypes.GameObjects.Graphics;
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const merging = new Set<number>();
@@ -137,13 +133,20 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
           if (pointer.isDown) onPlayerMove();
           this.redrawGuide();
         });
-        const releaseDropGesture = () => {
-          if (!activeDropGesture) return;
+        let activePointerId: number | null = null;
+        let activeTouchId: number | null = null;
+        let activeMouseGesture = false;
+        const commitDropGesture = (trackedSource = false) => {
+          if (!trackedSource && !activeDropGesture) return;
           activeDropGesture = false;
+          // 一套兼容事件完成投放后立即清空其他来源，避免 Safari 随后的合成事件重复投放。
+          activePointerId = null;
+          activeTouchId = null;
+          activeMouseGesture = false;
           this.dropFruit();
         };
-        this.input.on("pointerup", releaseDropGesture);
-        this.input.on("pointerupoutside", releaseDropGesture);
+        this.input.on("pointerup", () => commitDropGesture());
+        this.input.on("pointerupoutside", () => commitDropGesture());
 
         const canvas = this.game.canvas;
         const updateAimFromClientX = (clientX: number) => {
@@ -154,7 +157,6 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
           onPlayerMove();
           this.redrawGuide();
         };
-        let activePointerId: number | null = null;
         const onPointerDown = (event: PointerEvent) => {
           if (!event.isPrimary || event.button !== 0) return;
           activePointerId = event.pointerId;
@@ -168,21 +170,17 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         };
         const onPointerUp = (event: PointerEvent) => {
           if (activePointerId !== event.pointerId) return;
-          activePointerId = null;
-          releaseDropGesture();
+          commitDropGesture(true);
         };
         const onPointerCancel = (event: PointerEvent) => {
           if (activePointerId !== event.pointerId) return;
-          activePointerId = null;
           // Safari 把拖动升级为系统手势时会用 cancel 结束触点；对投放玩法它同样代表松手。
-          releaseDropGesture();
+          commitDropGesture(true);
         };
         const onLostPointerCapture = (event: PointerEvent) => {
           if (activePointerId !== event.pointerId) return;
-          activePointerId = null;
-          releaseDropGesture();
+          commitDropGesture(true);
         };
-        let activeTouchId: number | null = null;
         const onTouchStart = (event: TouchEvent) => {
           const touch = event.changedTouches[0];
           if (!touch) return;
@@ -197,9 +195,8 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         const finishTouch = (event: TouchEvent) => {
           const ended = Array.from(event.changedTouches).some(item => item.identifier === activeTouchId);
           if (!ended) return;
-          activeTouchId = null;
           // touchcancel 在 iOS 地址栏伸缩、系统手势竞争时很常见，不能把已完成的拖动吞掉。
-          releaseDropGesture();
+          commitDropGesture(true);
         };
         const startsOnGameCanvas = (event: Event) => event.composedPath().includes(canvas);
         const captureTouchStart = (event: TouchEvent) => {
@@ -210,7 +207,6 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
           if (!startsOnGameCanvas(event)) return;
           onPointerDown(event);
         };
-        let activeMouseGesture = false;
         const captureMouseDown = (event: MouseEvent) => {
           if (event.button !== 0 || !startsOnGameCanvas(event)) return;
           activeMouseGesture = true;
@@ -222,9 +218,8 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         };
         const captureMouseUp = () => {
           if (!activeMouseGesture) return;
-          activeMouseGesture = false;
           // Safari 合成的 mouseup 可能把 button 置为 -1；开始已确认是左键，本次结束不能再次按 button 过滤。
-          releaseDropGesture();
+          commitDropGesture(true);
         };
         // 捕获阶段先于 Phaser 的 canvas 监听器执行；Safari 即使在目标阶段截断事件，
         // 第二次手势的开始与结束仍能被游戏自己的投放状态机完整接收。
@@ -304,6 +299,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
 
         bridgeRef.current = {
           setPaused: (value) => {
+            if (!value) this.game.loop.wake();
             this.matter.world.enabled = !value;
             this.input.enabled = !value;
             // 暂停时冻结连击窗口和反馈动画，恢复后仍延续玩家暂停前的局面。
@@ -497,19 +493,15 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
 
       dropFruit() {
         if (isGameOver) return;
-        // Safari 在触摸链路切换后可能延迟甚至冻结 setTimeout；松手时用单调时钟主动恢复已到期的冷却。
-        if (!canDrop && performance.now() >= dropUnlockAt) {
-          canDrop = true;
-          if (dropCooldownTimer !== null) window.clearTimeout(dropCooldownTimer);
-          dropCooldownTimer = null;
-        }
-        // 玩家在上一颗的短冷却内已经完成第二次松手时，记住这次投放并在解锁后立即执行。
-        if (!canDrop) {
-          pendingDrop = true;
-          return;
-        }
-        pendingDrop = false;
-        canDrop = false;
+        // iOS Safari 从 pagehide/visibilitychange 返回时，React 的暂停按钮可能已恢复，
+        // 但 Matter 世界仍保留禁用态。有效画布手势发生时统一校准运行状态，避免水果停在半空。
+        this.game.loop.wake();
+        this.matter.world.enabled = true;
+        this.input.enabled = true;
+        this.time.paused = false;
+        this.tweens.paused = false;
+        // 同一物理手势已由 activeDropGesture 去重；不要再用定时锁限制下一次手势，
+        // iOS Safari 可能冻结页面时钟并让后续水果永久无法投放。
         this.spawnFruit(this.clampX(currentLevel, currentX), 36, currentLevel, false);
         onFeedback("drop", currentLevel);
         onPlayerDrop();
@@ -520,15 +512,6 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         currentX = this.clampX(currentLevel, currentX);
         onAim(currentX);
         this.redrawGuide();
-        if (dropCooldownTimer !== null) window.clearTimeout(dropCooldownTimer);
-        const cooldownMs = getDifficultyProfile(total).dropCooldownMs;
-        dropUnlockAt = performance.now() + cooldownMs;
-        // 使用浏览器时钟解锁，避免 iOS Safari 触摸取消后 Phaser 场景时钟暂停而永久锁住下一颗。
-        dropCooldownTimer = window.setTimeout(() => {
-          dropCooldownTimer = null;
-          canDrop = true;
-          if (pendingDrop) this.dropFruit();
-        }, cooldownMs);
       }
 
       update() {
@@ -567,7 +550,6 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
 
         if (highestProgress >= 1) {
           isGameOver = true;
-          canDrop = false;
           this.input.enabled = false;
           this.matter.world.enabled = false;
           onDanger(false);
@@ -611,7 +593,6 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
       cancelled = true;
       bridgeRef.current = null;
       removeGlobalReleaseListeners?.();
-      if (dropCooldownTimer !== null) window.clearTimeout(dropCooldownTimer);
       delete window.__ORCHARD_DIAGNOSTICS__;
       game?.destroy(true);
     };
