@@ -1,12 +1,46 @@
-.orchard-scroll { container-type: inline-size; background: #f6c56f; overflow: hidden !important; }
-.orchard-scroll .mobile-scroll-content { min-height: 100%; }
+.orchard-viewport {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  isolation: isolate;
+  background: #9f6f30;
+}
+
+.orchard-viewport-bg {
+  position: absolute;
+  z-index: -2;
+  inset: -32px;
+  width: calc(100% + 64px);
+  height: calc(100% + 64px);
+  object-fit: cover;
+  filter: blur(18px) saturate(0.82) brightness(0.72);
+  transform: scale(1.04);
+  pointer-events: none;
+}
+
+.orchard-viewport::after {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  content: "";
+  background: radial-gradient(circle at 50% 42%, transparent 24%, rgba(65, 31, 8, 0.3) 100%);
+  pointer-events: none;
+}
 
 .orchard-game {
-  position: relative;
-  width: 100%;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  flex: none;
+  width: 393px;
+  height: 852px;
   min-height: 852px;
-  /* HUD 以手机内容区为基准缩放，避免桌面预览视口影响组件尺寸。 */
-  --ui-scale: calc(100cqw / 393);
+  /* 物理世界保持 393×852 基准坐标，整层缩放可避免不同屏幕比例改变碰撞与落点。 */
+  --ui-scale: 1;
+  transform: translate(-50%, -50%) scale(var(--game-scale, 1));
+  transform-origin: center;
   overflow: hidden;
   color: #713912;
   font-family: "STKaiti", "KaiTi", "Noto Serif SC", serif;

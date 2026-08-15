@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type SyntheticEvent } from "react";
-import { MobileScroll } from "./mobile";
 import { CareerScreen } from "./CareerScreen";
 import { applyImageFallback, fruitAsset, gameAsset, localFruitAsset, localGameAsset, type GameAssetKey } from "./gameAssets";
 import { clearPlayerRecord, loadBestScore, loadGameSettings, saveBestScore, saveGameSettings, TUTORIAL_SEEN_KEY } from "./gameStorage";
@@ -18,6 +17,32 @@ function loadTutorialStep(): "intro" | null {
 }
 
 type TutorialStep = "intro" | "move" | "drop" | "complete" | null;
+const GAME_WIDTH = 393;
+const GAME_HEIGHT = 852;
+
+function readViewportScale() {
+  const viewport = window.visualViewport;
+  const width = viewport?.width ?? window.innerWidth;
+  const height = viewport?.height ?? window.innerHeight;
+  return Math.max(0.2, Math.min(width / GAME_WIDTH, height / GAME_HEIGHT));
+}
+
+function useViewportScale() {
+  const [scale, setScale] = useState(readViewportScale);
+
+  useEffect(() => {
+    const update = () => setScale(readViewportScale());
+    // 移动浏览器地址栏收起时只触发 visualViewport，监听两处才能持续贴合真实可玩区域。
+    window.addEventListener("resize", update);
+    window.visualViewport?.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("resize", update);
+    };
+  }, []);
+
+  return scale;
+}
 
 const fallbackToGameAsset = (key: GameAssetKey) => (event: SyntheticEvent<HTMLImageElement>) => {
   applyImageFallback(event.currentTarget, localGameAsset(key));
@@ -28,6 +53,7 @@ const fallbackToFruitAsset = (level: number) => (event: SyntheticEvent<HTMLImage
 };
 
 export default function Prototype() {
+  const viewportScale = useViewportScale();
   const [score, setScore] = useState(0);
   const [best, setBest] = useState(loadBestScore);
   const [next, setNext] = useState(2);
@@ -204,8 +230,14 @@ export default function Prototype() {
   };
 
   return (
-    <MobileScroll className="app-screen orchard-scroll">
-      <main className="orchard-game" data-testid="orchard-game" aria-label="果果合成">
+    <div className="orchard-viewport" data-testid="orchard-viewport">
+      <img className="orchard-viewport-bg" src={gameAsset("background")} onError={fallbackToGameAsset("background")} alt="" />
+      <main
+        className="orchard-game"
+        data-testid="orchard-game"
+        aria-label="果果合成"
+        style={{ "--game-scale": viewportScale } as CSSProperties}
+      >
         <img className="orchard-bg" src={gameAsset("background")} onError={fallbackToGameAsset("background")} alt="" />
         <img className="title-sign" src={gameAsset("title")} onError={fallbackToGameAsset("title")} alt="果果合成" />
 
@@ -302,6 +334,6 @@ export default function Prototype() {
           />
         )}
       </main>
-    </MobileScroll>
+    </div>
   );
 }
