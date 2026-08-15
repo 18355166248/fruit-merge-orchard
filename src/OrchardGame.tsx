@@ -83,6 +83,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     let game: PhaserTypes.Game | null = null;
     let removeGlobalReleaseListeners: (() => void) | null = null;
     let dropCooldownTimer: number | null = null;
+    let dropUnlockAt = 0;
 
     const boot = async () => {
       // Phaser 和远端水果同时准备；任一 CDN 图片不可用时 resolveFruitAssets 会逐张回退本地资源。
@@ -209,6 +210,22 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
           if (!startsOnGameCanvas(event)) return;
           onPointerDown(event);
         };
+        let activeMouseGesture = false;
+        const captureMouseDown = (event: MouseEvent) => {
+          if (event.button !== 0 || !startsOnGameCanvas(event)) return;
+          activeMouseGesture = true;
+          activeDropGesture = true;
+          updateAimFromClientX(event.clientX);
+        };
+        const captureMouseMove = (event: MouseEvent) => {
+          if (activeMouseGesture) updateAimFromClientX(event.clientX);
+        };
+        const captureMouseUp = () => {
+          if (!activeMouseGesture) return;
+          activeMouseGesture = false;
+          // Safari 合成的 mouseup 可能把 button 置为 -1；开始已确认是左键，本次结束不能再次按 button 过滤。
+          releaseDropGesture();
+        };
         // 捕获阶段先于 Phaser 的 canvas 监听器执行；Safari 即使在目标阶段截断事件，
         // 第二次手势的开始与结束仍能被游戏自己的投放状态机完整接收。
         document.addEventListener("pointerdown", capturePointerDown, { capture: true, passive: true });
@@ -219,6 +236,10 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         document.addEventListener("touchmove", onTouchMove, { capture: true, passive: true });
         document.addEventListener("touchend", finishTouch, { capture: true, passive: true });
         document.addEventListener("touchcancel", finishTouch, { capture: true, passive: true });
+        // macOS Safari 的拖动链路可能只保留传统 mouse 事件；显式覆盖才能保证松手落下。
+        document.addEventListener("mousedown", captureMouseDown, { capture: true, passive: true });
+        document.addEventListener("mousemove", captureMouseMove, { capture: true, passive: true });
+        document.addEventListener("mouseup", captureMouseUp, { capture: true, passive: true });
         canvas.addEventListener("pointerdown", onPointerDown, { passive: true });
         canvas.addEventListener("pointermove", onPointerMove, { passive: true });
         canvas.addEventListener("lostpointercapture", onLostPointerCapture, { passive: true });
@@ -237,6 +258,9 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
           document.removeEventListener("touchmove", onTouchMove, true);
           document.removeEventListener("touchend", finishTouch, true);
           document.removeEventListener("touchcancel", finishTouch, true);
+          document.removeEventListener("mousedown", captureMouseDown, true);
+          document.removeEventListener("mousemove", captureMouseMove, true);
+          document.removeEventListener("mouseup", captureMouseUp, true);
           canvas.removeEventListener("pointerdown", onPointerDown);
           canvas.removeEventListener("pointermove", onPointerMove);
           canvas.removeEventListener("lostpointercapture", onLostPointerCapture);
@@ -473,6 +497,12 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
 
       dropFruit() {
         if (isGameOver) return;
+        // Safari 在触摸链路切换后可能延迟甚至冻结 setTimeout；松手时用单调时钟主动恢复已到期的冷却。
+        if (!canDrop && performance.now() >= dropUnlockAt) {
+          canDrop = true;
+          if (dropCooldownTimer !== null) window.clearTimeout(dropCooldownTimer);
+          dropCooldownTimer = null;
+        }
         // 玩家在上一颗的短冷却内已经完成第二次松手时，记住这次投放并在解锁后立即执行。
         if (!canDrop) {
           pendingDrop = true;
@@ -491,12 +521,14 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         onAim(currentX);
         this.redrawGuide();
         if (dropCooldownTimer !== null) window.clearTimeout(dropCooldownTimer);
+        const cooldownMs = getDifficultyProfile(total).dropCooldownMs;
+        dropUnlockAt = performance.now() + cooldownMs;
         // 使用浏览器时钟解锁，避免 iOS Safari 触摸取消后 Phaser 场景时钟暂停而永久锁住下一颗。
         dropCooldownTimer = window.setTimeout(() => {
           dropCooldownTimer = null;
           canDrop = true;
           if (pendingDrop) this.dropFruit();
-        }, getDifficultyProfile(total).dropCooldownMs);
+        }, cooldownMs);
       }
 
       update() {

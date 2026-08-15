@@ -100,6 +100,27 @@ test("iOS 以 pointercancel 结束拖动后仍可连续投放", async ({ page })
   ).toBe(2);
 });
 
+test("Safari 仅发送传统 mouse 事件时松手仍会投放", async ({ page }) => {
+  const canvas = page.locator(".physics-canvas canvas");
+  const box = await canvas.boundingBox();
+  if (!box) throw new Error("游戏画布没有可用边界");
+  await expect.poll(() => page.evaluate(() => Boolean(window.__ORCHARD_DIAGNOSTICS__))).toBe(true);
+
+  await canvas.dispatchEvent("mousedown", {
+    button: 0,
+    clientX: box.x + box.width / 2,
+    clientY: box.y + 80,
+  });
+  await page.evaluate(({ clientX, clientY }) => {
+    document.dispatchEvent(new MouseEvent("mousemove", { button: 0, clientX, clientY }));
+    document.dispatchEvent(new MouseEvent("mouseup", { button: -1, clientX, clientY }));
+  }, { clientX: box.x + box.width * 0.72, clientY: box.y + 120 });
+
+  await expect.poll(
+    () => page.evaluate(() => window.__ORCHARD_DIAGNOSTICS__?.snapshot().bodyCount),
+  ).toBe(1);
+});
+
 test("界面图片加载失败时只回退一次本地资源", async ({ page }) => {
   const nextFruit = page.getByTestId("next-fruit");
   await nextFruit.evaluate((image: HTMLImageElement) => {
