@@ -12,7 +12,7 @@ const WORLD_RIGHT = 327;
 const WORLD_FLOOR = 444;
 const DANGER_Y = 45;
 const SPAWN_PROTECTION_MS = 900;
-const MIN_DROP_INTERVAL_MS = 220;
+const MIN_DROP_INTERVAL_MS = 140;
 const LOOP_STALL_THRESHOLD_MS = 1500;
 const MAX_CLEAR_SCORE = 150;
 
@@ -105,6 +105,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     let comboResetEvent: PhaserTypes.Time.TimerEvent | null = null;
     let activeDropGesture = false;
     let lastDropAt = Number.NEGATIVE_INFINITY;
+    let dropQueued = false;
     let lastSceneHeartbeatAt = window.performance.now();
     let runtimePaused = paused;
     let guide: PhaserTypes.GameObjects.Graphics;
@@ -520,8 +521,12 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
       dropFruit() {
         if (isGameOver) return;
         const dropAt = window.performance.now();
-        // 使用时间差而不是定时解锁：连续合成事件会被去重，真实下一次手势很快即可继续且不会永久锁死。
-        if (dropAt - lastDropAt < MIN_DROP_INTERVAL_MS) return;
+        // 高频点击只缓冲一颗而不直接丢弃，既保持跟手感，也避免输入无限堆积压垮移动端物理计算。
+        if (dropAt - lastDropAt < MIN_DROP_INTERVAL_MS) {
+          dropQueued = true;
+          return;
+        }
+        dropQueued = false;
         lastDropAt = dropAt;
         // iOS Safari 从 pagehide/visibilitychange 返回时，React 的暂停按钮可能已恢复，
         // 但 Matter 世界仍保留禁用态。有效画布手势发生时统一校准运行状态，避免水果停在半空。
@@ -545,6 +550,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
       update() {
         if (isGameOver) return;
         lastSceneHeartbeatAt = window.performance.now();
+        if (dropQueued && lastSceneHeartbeatAt - lastDropAt >= MIN_DROP_INTERVAL_MS) this.dropFruit();
         const now = this.time.now;
         let highestProgress = 0;
         const liveIds = new Set<number>();
