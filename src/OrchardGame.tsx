@@ -12,6 +12,7 @@ const WORLD_RIGHT = 327;
 const WORLD_FLOOR = 444;
 const DANGER_Y = 45;
 const SPAWN_PROTECTION_MS = 900;
+const DROP_LOCK_FALLBACK_MS = 3000;
 const MAX_CLEAR_SCORE = 150;
 
 type GameBridge = {
@@ -99,6 +100,8 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     let lastMergeAt = Number.NEGATIVE_INFINITY;
     let comboResetEvent: PhaserTypes.Time.TimerEvent | null = null;
     let activeDropGesture = false;
+    let activeDropBodyId: number | null = null;
+    let activeDropStartedAt = 0;
     let guide: PhaserTypes.GameObjects.Graphics;
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const merging = new Set<number>();
@@ -270,6 +273,10 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         // 碰撞回调只登记合成，下一拍统一落账，避免遍历碰撞对时直接销毁 body。
         this.matter.world.on("collisionstart", (event: PhaserTypes.Physics.Matter.Events.CollisionStartEvent) => {
           event.pairs.forEach((pair) => {
+            if (pair.bodyA.id === activeDropBodyId || pair.bodyB.id === activeDropBodyId) {
+              // 当前投放水果首次接触箱底或其他水果后，才开放下一次投放，避免连点压垮 Safari 主线程。
+              activeDropBodyId = null;
+            }
             const a = pair.bodyA.gameObject as PhaserTypes.Physics.Matter.Image | undefined;
             const b = pair.bodyB.gameObject as PhaserTypes.Physics.Matter.Image | undefined;
             if (!a || !b || a === b || !a.active || !b.active) return;
@@ -299,7 +306,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
 
         bridgeRef.current = {
           setPaused: (value) => {
-            if (!value) this.restartRuntimeLoop();
+            if (!value) this.ensureRuntimeRunning();
             this.matter.world.enabled = !value;
             this.input.enabled = !value;
             // 暂停时冻结连击窗口和反馈动画，恢复后仍延续玩家暂停前的局面。
@@ -491,27 +498,26 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         return pickStartLevel(Phaser.Math.Between(1, 100), profile.levelThresholds);
       }
 
-      restartRuntimeLoop() {
-        // iOS Safari 偶发停止 RAF，但 Phaser 的 running 标志仍为 true，单纯 wake 会直接返回。
-        // 强制重建 RAF，并同步恢复 Game 与 TimeStep，确保 Matter 下一帧继续计算。
+      ensureRuntimeRunning() {
+        // 恢复时只唤醒真正休眠的循环；运行中反复 sleep/wake 会让 Safari 丢失 RAF 调度。
         this.game.resume();
         this.game.loop.resume();
-        this.game.loop.sleep();
-        this.game.loop.wake(true);
+        if (!this.game.loop.running) this.game.loop.wake(true);
       }
 
       dropFruit() {
-        if (isGameOver) return;
+        if (isGameOver || activeDropBodyId !== null) return;
         // iOS Safari 从 pagehide/visibilitychange 返回时，React 的暂停按钮可能已恢复，
         // 但 Matter 世界仍保留禁用态。有效画布手势发生时统一校准运行状态，避免水果停在半空。
-        this.restartRuntimeLoop();
+        this.ensureRuntimeRunning();
         this.matter.world.enabled = true;
         this.input.enabled = true;
         this.time.paused = false;
         this.tweens.paused = false;
-        // 同一物理手势已由 activeDropGesture 去重；不要再用定时锁限制下一次手势，
-        // iOS Safari 可能冻结页面时钟并让后续水果永久无法投放。
-        this.spawnFruit(this.clampX(currentLevel, currentX), 36, currentLevel, false);
+        // 同一物理手势由 activeDropGesture 去重，跨手势则由当前水果的碰撞状态限流。
+        const droppedFruit = this.spawnFruit(this.clampX(currentLevel, currentX), 36, currentLevel, false);
+        activeDropBodyId = this.matter.world.getAllBodies().find((body) => body.gameObject === droppedFruit)?.id ?? null;
+        activeDropStartedAt = this.time.now;
         onFeedback("drop", currentLevel);
         onPlayerDrop();
         currentLevel = nextLevel;
@@ -526,6 +532,13 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
       update() {
         if (isGameOver) return;
         const now = this.time.now;
+        if (activeDropBodyId !== null) {
+          const activeBody = this.matter.world.getAllBodies().find((body) => body.id === activeDropBodyId);
+          if (!activeBody || now - activeDropStartedAt >= DROP_LOCK_FALLBACK_MS) {
+            // body 在合成中被销毁或极端设备漏发碰撞时自动解锁，不能让玩家永久无法继续。
+            activeDropBodyId = null;
+          }
+        }
         let highestProgress = 0;
         const liveIds = new Set<number>();
 
