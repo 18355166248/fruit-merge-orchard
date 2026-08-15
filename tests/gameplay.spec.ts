@@ -62,20 +62,25 @@ test("拖动离开画布后松手仍会投放水果", async ({ page }) => {
   await expect(page.getByTestId("current-fruit")).toHaveAttribute("src", /fruit-03\.png$/);
 });
 
-test("当前水果落稳前会忽略连续投放，落地后可继续", async ({ page }) => {
+test("连续投放会短暂限流且无需等待水果落地", async ({ page }) => {
   const canvas = page.locator(".physics-canvas canvas");
   await expect.poll(() => page.evaluate(() => Boolean(window.__ORCHARD_DIAGNOSTICS__))).toBe(true);
 
   await canvas.click({ position: { x: 150, y: 80 } });
-  for (let index = 0; index < 12; index += 1) {
-    await canvas.click({ position: { x: 150 + (index % 3) * 20, y: 80 } });
-  }
+  await canvas.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    for (let index = 0; index < 12; index += 1) {
+      const clientX = rect.left + 150 + (index % 3) * 20;
+      element.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, clientX, clientY: rect.top + 80 }));
+      document.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, button: 0, clientX, clientY: rect.top + 80 }));
+    }
+  });
 
   await expect.poll(
     () => page.evaluate(() => window.__ORCHARD_DIAGNOSTICS__?.snapshot().bodyCount),
   ).toBe(1);
 
-  await page.waitForTimeout(1200);
+  await page.waitForTimeout(260);
   await canvas.click({ position: { x: 190, y: 80 } });
   await expect.poll(
     () => page.evaluate(() => window.__ORCHARD_DIAGNOSTICS__?.snapshot().bodyCount),
@@ -83,7 +88,16 @@ test("当前水果落稳前会忽略连续投放，落地后可继续", async ({
   ).toBe(2);
 });
 
-test("iOS 以 pointercancel 结束拖动后仍可在落地后继续投放", async ({ page }) => {
+test("Safari 丢失动画循环后看门狗会自动恢复", async ({ page }) => {
+  await expect.poll(() => page.evaluate(() => Boolean(window.__ORCHARD_DIAGNOSTICS__))).toBe(true);
+  await page.evaluate(() => window.__ORCHARD_DIAGNOSTICS__?.stopRuntimeLoop());
+  await expect.poll(
+    () => page.evaluate(() => window.__ORCHARD_DIAGNOSTICS__?.snapshot().runtimeRunning),
+    { timeout: 4000 },
+  ).toBe(true);
+});
+
+test("iOS 以 pointercancel 结束拖动后可快速继续投放", async ({ page }) => {
   const canvas = page.locator(".physics-canvas canvas");
   const box = await canvas.boundingBox();
   if (!box) throw new Error("游戏画布没有可用边界");
@@ -100,7 +114,7 @@ test("iOS 以 pointercancel 结束拖动后仍可在落地后继续投放", asyn
     await page.evaluate((id) => {
       window.dispatchEvent(new PointerEvent("pointercancel", { pointerId: id, isPrimary: true }));
     }, pointerId);
-    if (pointerId === 71) await page.waitForTimeout(1200);
+    if (pointerId === 71) await page.waitForTimeout(260);
   }
 
   await expect.poll(

@@ -12,7 +12,8 @@ const WORLD_RIGHT = 327;
 const WORLD_FLOOR = 444;
 const DANGER_Y = 45;
 const SPAWN_PROTECTION_MS = 900;
-const DROP_LOCK_FALLBACK_MS = 3000;
+const MIN_DROP_INTERVAL_MS = 220;
+const LOOP_STALL_THRESHOLD_MS = 1500;
 const MAX_CLEAR_SCORE = 150;
 
 type GameBridge = {
@@ -24,12 +25,14 @@ type GameBridge = {
 type OrchardDiagnostics = {
   spawnMergePair: (level: number) => void;
   spawnFruit: (level: number, x: number, y: number) => void;
+  stopRuntimeLoop: () => void;
   snapshot: () => {
     bodyCount: number;
     invalidBodyCount: number;
     outOfBoundsBodyCount: number;
     pendingMergeCount: number;
     score: number;
+    runtimeRunning: boolean;
   };
 };
 
@@ -83,6 +86,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     let cancelled = false;
     let game: PhaserTypes.Game | null = null;
     let removeGlobalReleaseListeners: (() => void) | null = null;
+    let runtimeWatchdog: ReturnType<typeof window.setInterval> | null = null;
 
     const boot = async () => {
       // Phaser 和远端水果同时准备；任一 CDN 图片不可用时 resolveFruitAssets 会逐张回退本地资源。
@@ -100,8 +104,9 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     let lastMergeAt = Number.NEGATIVE_INFINITY;
     let comboResetEvent: PhaserTypes.Time.TimerEvent | null = null;
     let activeDropGesture = false;
-    let activeDropBodyId: number | null = null;
-    let activeDropStartedAt = 0;
+    let lastDropAt = Number.NEGATIVE_INFINITY;
+    let lastSceneHeartbeatAt = window.performance.now();
+    let runtimePaused = paused;
     let guide: PhaserTypes.GameObjects.Graphics;
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const merging = new Set<number>();
@@ -273,10 +278,6 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         // 碰撞回调只登记合成，下一拍统一落账，避免遍历碰撞对时直接销毁 body。
         this.matter.world.on("collisionstart", (event: PhaserTypes.Physics.Matter.Events.CollisionStartEvent) => {
           event.pairs.forEach((pair) => {
-            if (pair.bodyA.id === activeDropBodyId || pair.bodyB.id === activeDropBodyId) {
-              // 当前投放水果首次接触箱底或其他水果后，才开放下一次投放，避免连点压垮 Safari 主线程。
-              activeDropBodyId = null;
-            }
             const a = pair.bodyA.gameObject as PhaserTypes.Physics.Matter.Image | undefined;
             const b = pair.bodyB.gameObject as PhaserTypes.Physics.Matter.Image | undefined;
             if (!a || !b || a === b || !a.active || !b.active) return;
@@ -306,6 +307,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
 
         bridgeRef.current = {
           setPaused: (value) => {
+            runtimePaused = value;
             if (!value) this.ensureRuntimeRunning();
             this.matter.world.enabled = !value;
             this.input.enabled = !value;
@@ -335,6 +337,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
               const safeLevel = Phaser.Math.Clamp(Math.floor(level), 0, FRUIT_COUNT - 1);
               this.spawnFruit(x, y, safeLevel, false);
             },
+            stopRuntimeLoop: () => this.game.loop.sleep(),
             snapshot: () => {
               const bodies = this.matter.world.getAllBodies().filter((body) => !body.isStatic && body.gameObject);
               return {
@@ -352,10 +355,19 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
                 )).length,
                 pendingMergeCount: pendingMerges.length + merging.size,
                 score: total,
+                runtimeRunning: this.game.loop.running,
               };
             },
           };
         }
+        // Safari 偶发丢失 RAF 但仍可处理定时器；只在心跳真实停止时重建一次循环。
+        runtimeWatchdog = window.setInterval(() => {
+          if (runtimePaused || isGameOver || document.visibilityState !== "visible") return;
+          if (window.performance.now() - lastSceneHeartbeatAt < LOOP_STALL_THRESHOLD_MS) return;
+          this.game.loop.sleep();
+          this.game.loop.wake(true);
+          lastSceneHeartbeatAt = window.performance.now();
+        }, 750);
         onReady();
 
       }
@@ -506,7 +518,11 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
       }
 
       dropFruit() {
-        if (isGameOver || activeDropBodyId !== null) return;
+        if (isGameOver) return;
+        const dropAt = window.performance.now();
+        // 使用时间差而不是定时解锁：连续合成事件会被去重，真实下一次手势很快即可继续且不会永久锁死。
+        if (dropAt - lastDropAt < MIN_DROP_INTERVAL_MS) return;
+        lastDropAt = dropAt;
         // iOS Safari 从 pagehide/visibilitychange 返回时，React 的暂停按钮可能已恢复，
         // 但 Matter 世界仍保留禁用态。有效画布手势发生时统一校准运行状态，避免水果停在半空。
         this.ensureRuntimeRunning();
@@ -514,10 +530,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         this.input.enabled = true;
         this.time.paused = false;
         this.tweens.paused = false;
-        // 同一物理手势由 activeDropGesture 去重，跨手势则由当前水果的碰撞状态限流。
-        const droppedFruit = this.spawnFruit(this.clampX(currentLevel, currentX), 36, currentLevel, false);
-        activeDropBodyId = this.matter.world.getAllBodies().find((body) => body.gameObject === droppedFruit)?.id ?? null;
-        activeDropStartedAt = this.time.now;
+        this.spawnFruit(this.clampX(currentLevel, currentX), 36, currentLevel, false);
         onFeedback("drop", currentLevel);
         onPlayerDrop();
         currentLevel = nextLevel;
@@ -531,14 +544,8 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
 
       update() {
         if (isGameOver) return;
+        lastSceneHeartbeatAt = window.performance.now();
         const now = this.time.now;
-        if (activeDropBodyId !== null) {
-          const activeBody = this.matter.world.getAllBodies().find((body) => body.id === activeDropBodyId);
-          if (!activeBody || now - activeDropStartedAt >= DROP_LOCK_FALLBACK_MS) {
-            // body 在合成中被销毁或极端设备漏发碰撞时自动解锁，不能让玩家永久无法继续。
-            activeDropBodyId = null;
-          }
-        }
         let highestProgress = 0;
         const liveIds = new Set<number>();
 
@@ -582,7 +589,8 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     }
 
     game = new Phaser.Game({
-      type: Phaser.AUTO,
+      // 该游戏只有少量 2D 圆形精灵，Canvas 渲染足够且可绕开 iOS Safari 的 WebGL 上下文丢失。
+      type: Phaser.CANVAS,
       parent: hostRef.current,
       width: 336,
       height: 474,
@@ -615,6 +623,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
       cancelled = true;
       bridgeRef.current = null;
       removeGlobalReleaseListeners?.();
+      if (runtimeWatchdog !== null) window.clearInterval(runtimeWatchdog);
       delete window.__ORCHARD_DIAGNOSTICS__;
       game?.destroy(true);
     };
