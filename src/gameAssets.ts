@@ -33,6 +33,11 @@ const LOCAL_ASSETS = {
   bin: "/assets/game/wooden-bin-frame.png",
 } as const;
 
+// 第 3 级旧 CDN 素材与蓝莓外观重复；该等级固定走新版葡萄资源，避免生产环境回退到旧图。
+const LOCAL_FRUIT_OVERRIDES: Partial<Record<number, string>> = {
+  2: "/assets/game/fruits/fruit-03-grape.png",
+};
+
 export type GameAssetKey = keyof typeof LOCAL_ASSETS;
 
 const resolvedGameAssets = new Map<GameAssetKey, string>();
@@ -47,11 +52,15 @@ export const localGameAsset = (key: GameAssetKey) => LOCAL_ASSETS[key];
 export const fruitAsset = (level: number) => {
   const resolved = resolvedFruitAssets.get(level);
   if (resolved) return resolved;
+  const localOverride = LOCAL_FRUIT_OVERRIDES[level];
+  if (localOverride) return localOverride;
   const name = `fruit-${String(level + 1).padStart(2, "0")}` as keyof typeof CDN_ASSETS;
   return import.meta.env.DEV ? `/assets/game/fruits/${name}.png` : CDN_ASSETS[name];
 };
 
 export const localFruitAsset = (level: number) => {
+  const localOverride = LOCAL_FRUIT_OVERRIDES[level];
+  if (localOverride) return localOverride;
   const name = `fruit-${String(level + 1).padStart(2, "0")}`;
   return `/assets/game/fruits/${name}.png`;
 };
@@ -122,7 +131,8 @@ export function preloadGameAssets(
     }),
     ...Array.from({ length: fruitCount }, async (_, level) => {
       const name = `fruit-${String(level + 1).padStart(2, "0")}` as keyof typeof CDN_ASSETS;
-      const source = await resolveImage(CDN_ASSETS[name], localFruitAsset(level), timeoutMs);
+      const localSource = localFruitAsset(level);
+      const source = await resolveImage(LOCAL_FRUIT_OVERRIDES[level] ?? CDN_ASSETS[name], localSource, timeoutMs);
       resolvedFruitAssets.set(level, source);
       tick();
     }),

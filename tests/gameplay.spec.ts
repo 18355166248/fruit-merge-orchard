@@ -43,10 +43,10 @@ test("页面进入后台时自动暂停且不会自行恢复", async ({ page }) 
 test("投放后当前水果按预告队列推进", async ({ page }) => {
   const canvas = page.locator(".physics-canvas canvas");
   await expect(page.getByTestId("current-fruit")).toHaveAttribute("src", /fruit-04\.png$/);
-  await expect(page.getByTestId("next-fruit")).toHaveAttribute("src", /fruit-03\.png$/);
+  await expect(page.getByTestId("next-fruit")).toHaveAttribute("src", /fruit-03-grape\.png$/);
 
   await canvas.click({ position: { x: 165, y: 90 } });
-  await expect(page.getByTestId("current-fruit")).toHaveAttribute("src", /fruit-03\.png$/);
+  await expect(page.getByTestId("current-fruit")).toHaveAttribute("src", /fruit-03-grape\.png$/);
 });
 
 test("拖动离开画布后松手仍会投放水果", async ({ page }) => {
@@ -59,7 +59,7 @@ test("拖动离开画布后松手仍会投放水果", async ({ page }) => {
   await page.mouse.move(box.x + box.width + 24, box.y + 120, { steps: 4 });
   await page.mouse.up();
 
-  await expect(page.getByTestId("current-fruit")).toHaveAttribute("src", /fruit-03\.png$/);
+  await expect(page.getByTestId("current-fruit")).toHaveAttribute("src", /fruit-03-grape\.png$/);
 });
 
 test("连续投放会缓冲一颗且无需等待水果落地", async ({ page }) => {
@@ -192,7 +192,7 @@ test("界面图片加载失败时只回退一次本地资源", async ({ page }) 
     image.dispatchEvent(new Event("error"));
   });
 
-  await expect(nextFruit).toHaveAttribute("src", /\/assets\/game\/fruits\/fruit-03\.png$/);
+  await expect(nextFruit).toHaveAttribute("src", /\/assets\/game\/fruits\/fruit-03-grape\.png$/);
   await expect(nextFruit).toHaveAttribute("data-fallback-applied", "true");
 });
 
@@ -371,7 +371,7 @@ test("键盘可以移动并投放水果", async ({ page }) => {
   await page.keyboard.press("ArrowLeft");
   await expect(current).not.toHaveAttribute("style", before ?? "");
   await page.keyboard.press("Space");
-  await expect(page.getByTestId("current-fruit")).toHaveAttribute("src", /fruit-03\.png$/);
+  await expect(page.getByTestId("current-fruit")).toHaveAttribute("src", /fruit-03-grape\.png$/);
 });
 
 test("左右极限投放不会遮挡 HUD", async ({ page }) => {
