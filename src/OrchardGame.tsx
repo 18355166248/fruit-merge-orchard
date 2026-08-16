@@ -15,7 +15,6 @@ const SPAWN_PROTECTION_MS = 900;
 const MIN_DROP_INTERVAL_MS = 140;
 const DROP_RELEASE_Y = 96;
 const DROP_INITIAL_VELOCITY_Y = 3.2;
-const DROP_CHANNEL_MAX_MS = 360;
 const LOOP_STALL_THRESHOLD_MS = 1500;
 const MAX_CLEAR_SCORE = 150;
 
@@ -36,6 +35,7 @@ type OrchardDiagnostics = {
     pendingMergeCount: number;
     score: number;
     runtimeRunning: boolean;
+    activeDropLocked: boolean;
   };
 };
 
@@ -108,7 +108,6 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     let comboResetEvent: PhaserTypes.Time.TimerEvent | null = null;
     let activeDropGesture = false;
     let activeDropBodyId: number | null = null;
-    let activeDropStartedAt = 0;
     let lastDropAt = Number.NEGATIVE_INFINITY;
     let dropQueued = false;
     let lastSceneHeartbeatAt = window.performance.now();
@@ -279,6 +278,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
                 pendingMergeCount: pendingMerges.length + merging.size,
                 score: total,
                 runtimeRunning: this.game.loop.running,
+                activeDropLocked: activeDropBodyId !== null,
               };
             },
           };
@@ -405,6 +405,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
             return;
           }
 
+          const carriesDropLock = activeDropBodyId === bodyAId || activeDropBodyId === bodyBId;
           a.destroy();
           b.destroy();
           overflowSince.delete(bodyAId);
@@ -414,9 +415,18 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
           const reward = this.registerMerge(basePoints);
           if (level >= FRUIT_COUNT - 1) {
             // 两枚最高级水果相遇后清场，避免生成不存在的等级并给出明确终局奖励。
+            if (carriesDropLock) activeDropBodyId = null;
           } else {
             const resultLevel = level + 1;
-            this.spawnFruit(merge.x, merge.y, resultLevel, true, velocityX, velocityY);
+            const mergedFruit = this.spawnFruit(merge.x, merge.y, resultLevel, true, velocityX, velocityY);
+            if (merge.y < DROP_RELEASE_Y) {
+              // 顶部合成结果必须继续向下离开投放通道，不能停在生成点与下一颗重叠。
+              mergedFruit.setVelocityY(Math.max(mergedFruit.body?.velocity.y ?? 0, DROP_INITIAL_VELOCITY_Y));
+            }
+            if (carriesDropLock) {
+              // 投放中的水果即使发生合成，生命周期也转移给结果 body，避免旧 body 销毁后提前解锁。
+              activeDropBodyId = this.matter.world.getAllBodies().find((body) => body.gameObject === mergedFruit)?.id ?? null;
+            }
           }
           total += reward.points;
           this.playMergeEffect(merge.x, merge.y, level + 1, reward.points, reward.multiplier);
@@ -463,7 +473,6 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         // 因为下一颗生成时上一颗已经真实离开，不会在 Safari 中产生重叠刚体风暴。
         droppedFruit.setVelocityY(DROP_INITIAL_VELOCITY_Y);
         activeDropBodyId = this.matter.world.getAllBodies().find((body) => body.gameObject === droppedFruit)?.id ?? null;
-        activeDropStartedAt = window.performance.now();
         onFeedback("drop", currentLevel);
         onPlayerDrop();
         currentLevel = nextLevel;
@@ -481,11 +490,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         const now = this.time.now;
         if (activeDropBodyId !== null) {
           const activeBody = this.matter.world.getAllBodies().find((body) => body.id === activeDropBodyId);
-          if (!activeBody || activeBody.position.y >= DROP_RELEASE_Y || lastSceneHeartbeatAt - activeDropStartedAt >= DROP_CHANNEL_MAX_MS) {
-            // 使用单调墙钟避免 Safari 降低游戏时间步长后拖慢投放；这里只在 update 帧中执行，
-            // 因此 RAF 真停时仍不会继续灌入刚体。
-            activeDropBodyId = null;
-          }
+          if (!activeBody || activeBody.position.y >= DROP_RELEASE_Y) activeDropBodyId = null;
         }
         if (dropQueued && activeDropBodyId === null && lastSceneHeartbeatAt - lastDropAt >= MIN_DROP_INTERVAL_MS) this.dropFruit();
         let highestProgress = 0;
@@ -524,8 +529,9 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
           this.input.enabled = false;
           this.matter.world.enabled = false;
           onDanger(false);
-          onFeedback("game-over");
+          // 先提交终局 UI，再播放可选反馈；Safari 的振动/音频异常不能留下“物理停止但无结束面板”的假死状态。
           onGameOver(total);
+          try { onFeedback("game-over"); } catch { /* 反馈失败不影响终局状态。 */ }
         }
       }
     }

@@ -18,12 +18,13 @@ export function useGameFeedback(settings: GameSettings) {
   return useCallback((kind: FeedbackKind, level = 0) => {
     const currentSettings = settingsRef.current;
 
-    if (currentSettings.hapticsEnabled && "vibrate" in navigator) {
-      navigator.vibrate(kind === "merge" ? [10, 18, 12] : kind === "game-over" ? [30, 35, 50] : 6);
-    }
-    if (!currentSettings.soundEnabled) return;
-
     try {
+      // Safari/WebView 可能暴露 vibrate 属性但调用时抛错，反馈能力不能中断游戏状态机。
+      if (currentSettings.hapticsEnabled && "vibrate" in navigator) {
+        navigator.vibrate(kind === "merge" ? [10, 18, 12] : kind === "game-over" ? [30, 35, 50] : 6);
+      }
+      if (!currentSettings.soundEnabled) return;
+
       const AudioContextClass = window.AudioContext ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
       if (!AudioContextClass) return;
       const context = audioContextRef.current ?? new AudioContextClass();

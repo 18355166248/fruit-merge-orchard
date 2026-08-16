@@ -104,6 +104,18 @@ test("Safari 持续连点时顶部投放区不会无限创建水果", async ({ p
   expect(await page.evaluate(() => window.__ORCHARD_DIAGNOSTICS__?.snapshot().bodyCount)).toBeLessThan(18);
 });
 
+test("顶部合成后投放锁会转移到新的水果 body", async ({ page }) => {
+  const canvas = page.locator(".physics-canvas canvas");
+  await expect.poll(() => page.evaluate(() => Boolean(window.__ORCHARD_DIAGNOSTICS__))).toBe(true);
+
+  await canvas.click({ position: { x: 168, y: 80 } });
+  await page.evaluate(() => window.__ORCHARD_DIAGNOSTICS__?.spawnFruit(3, 168, 36));
+
+  await expect.poll(
+    () => page.evaluate(() => window.__ORCHARD_DIAGNOSTICS__?.snapshot()),
+  ).toMatchObject({ bodyCount: 1, pendingMergeCount: 0, activeDropLocked: true });
+});
+
 test("Safari 丢失动画循环后看门狗会自动恢复", async ({ page }) => {
   await expect.poll(() => page.evaluate(() => Boolean(window.__ORCHARD_DIAGNOSTICS__))).toBe(true);
   await page.evaluate(() => window.__ORCHARD_DIAGNOSTICS__?.stopRuntimeLoop());
