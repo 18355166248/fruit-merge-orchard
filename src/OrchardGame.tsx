@@ -15,6 +15,8 @@ const SPAWN_PROTECTION_MS = 900;
 const MIN_DROP_INTERVAL_MS = 140;
 const DROP_RELEASE_Y = 96;
 const DROP_INITIAL_VELOCITY_Y = 3.2;
+const DROP_PROGRESS_EPSILON = 1;
+const DROP_CHANNEL_STALL_MS = 1400;
 const LOOP_STALL_THRESHOLD_MS = 1500;
 const MAX_CLEAR_SCORE = 150;
 
@@ -28,6 +30,7 @@ type OrchardDiagnostics = {
   spawnMergePair: (level: number) => void;
   spawnFruit: (level: number, x: number, y: number) => void;
   stopRuntimeLoop: () => void;
+  stallActiveDrop: () => void;
   snapshot: () => {
     bodyCount: number;
     invalidBodyCount: number;
@@ -108,6 +111,8 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     let comboResetEvent: PhaserTypes.Time.TimerEvent | null = null;
     let activeDropGesture = false;
     let activeDropBodyId: number | null = null;
+    let activeDropLastY = 0;
+    let activeDropLastProgressAt = 0;
     let lastDropAt = Number.NEGATIVE_INFINITY;
     let dropQueued = false;
     let lastSceneHeartbeatAt = window.performance.now();
@@ -260,6 +265,11 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
               this.spawnFruit(x, y, safeLevel, false);
             },
             stopRuntimeLoop: () => this.game.loop.sleep(),
+            stallActiveDrop: () => {
+              const activeBody = this.matter.world.getAllBodies().find((body) => body.id === activeDropBodyId);
+              const activeFruit = activeBody?.gameObject as PhaserTypes.Physics.Matter.Image | undefined;
+              activeFruit?.setPosition(168, 72).setVelocity(0, 0).setStatic(true);
+            },
             snapshot: () => {
               const bodies = this.matter.world.getAllBodies().filter((body) => !body.isStatic && body.gameObject);
               return {
@@ -426,6 +436,8 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
             if (carriesDropLock) {
               // 投放中的水果即使发生合成，生命周期也转移给结果 body，避免旧 body 销毁后提前解锁。
               activeDropBodyId = this.matter.world.getAllBodies().find((body) => body.gameObject === mergedFruit)?.id ?? null;
+              activeDropLastY = mergedFruit.y;
+              activeDropLastProgressAt = window.performance.now();
             }
           }
           total += reward.points;
@@ -473,6 +485,8 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         // 因为下一颗生成时上一颗已经真实离开，不会在 Safari 中产生重叠刚体风暴。
         droppedFruit.setVelocityY(DROP_INITIAL_VELOCITY_Y);
         activeDropBodyId = this.matter.world.getAllBodies().find((body) => body.gameObject === droppedFruit)?.id ?? null;
+        activeDropLastY = droppedFruit.y;
+        activeDropLastProgressAt = window.performance.now();
         onFeedback("drop", currentLevel);
         onPlayerDrop();
         currentLevel = nextLevel;
@@ -488,12 +502,22 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         if (isGameOver) return;
         lastSceneHeartbeatAt = window.performance.now();
         const now = this.time.now;
+        let dropChannelBlocked = false;
         if (activeDropBodyId !== null) {
           const activeBody = this.matter.world.getAllBodies().find((body) => body.id === activeDropBodyId);
-          if (!activeBody || activeBody.position.y >= DROP_RELEASE_Y) activeDropBodyId = null;
+          if (!activeBody || activeBody.position.y >= DROP_RELEASE_Y) {
+            activeDropBodyId = null;
+          } else if (activeBody.position.y >= activeDropLastY + DROP_PROGRESS_EPSILON) {
+            activeDropLastY = activeBody.position.y;
+            activeDropLastProgressAt = lastSceneHeartbeatAt;
+          } else if (lastSceneHeartbeatAt - activeDropLastProgressAt >= DROP_CHANNEL_STALL_MS) {
+            // 果篮堆到红线下方时，水果可能卡在投放通道却不满足旧危险线条件；
+            // 明确结束本局，避免所有后续点击被投放锁永久吞掉且没有任何提示。
+            dropChannelBlocked = true;
+          }
         }
         if (dropQueued && activeDropBodyId === null && lastSceneHeartbeatAt - lastDropAt >= MIN_DROP_INTERVAL_MS) this.dropFruit();
-        let highestProgress = 0;
+        let highestProgress = dropChannelBlocked ? 1 : 0;
         const liveIds = new Set<number>();
 
         this.matter.world.getAllBodies().forEach((body) => {

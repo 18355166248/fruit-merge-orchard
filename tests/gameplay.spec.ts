@@ -116,6 +116,17 @@ test("顶部合成后投放锁会转移到新的水果 body", async ({ page }) =
   ).toMatchObject({ bodyCount: 1, pendingMergeCount: 0, activeDropLocked: true });
 });
 
+test("投放水果卡在红线下方时会明确结束而不是永久锁住", async ({ page }) => {
+  const canvas = page.locator(".physics-canvas canvas");
+  await expect.poll(() => page.evaluate(() => Boolean(window.__ORCHARD_DIAGNOSTICS__))).toBe(true);
+
+  await canvas.click({ position: { x: 168, y: 80 } });
+  await page.evaluate(() => window.__ORCHARD_DIAGNOSTICS__?.stallActiveDrop());
+
+  await expect(page.getByRole("dialog", { name: "本局结束" })).toBeVisible({ timeout: 3500 });
+  await expect(page.getByRole("button", { name: "再来一局" })).toBeVisible();
+});
+
 test("Safari 丢失动画循环后看门狗会自动恢复", async ({ page }) => {
   await expect.poll(() => page.evaluate(() => Boolean(window.__ORCHARD_DIAGNOSTICS__))).toBe(true);
   await page.evaluate(() => window.__ORCHARD_DIAGNOSTICS__?.stopRuntimeLoop());
