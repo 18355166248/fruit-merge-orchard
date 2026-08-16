@@ -108,9 +108,9 @@
   z-index: 6;
   /* 与 Matter 的 336 宽逻辑画布同轴，水果中心始终对应真实落点。 */
   left: var(--aim-left);
-  top: 17px;
-  width: 44px;
-  height: 44px;
+  top: var(--hanging-top);
+  width: var(--hanging-width);
+  height: var(--hanging-height);
   object-fit: contain;
   filter: drop-shadow(0 2px 1px #6f3c2044);
   pointer-events: none;

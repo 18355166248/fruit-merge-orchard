@@ -1,11 +1,10 @@
 import { useEffect, useRef, type KeyboardEvent } from "react";
 import type * as PhaserTypes from "phaser";
 import { resolveFruitAssets } from "./gameAssets";
-import { calculateMergeReward, COMBO_WINDOW_MS, getDifficultyProfile, pickStartLevel } from "./gameRules";
+import { calculateMergeReward, COMBO_WINDOW_MS, FRUIT_PHYSICS_SCALE, FRUIT_RADII, getDifficultyProfile, getDropSpawnY, pickStartLevel } from "./gameRules";
 import type { FeedbackKind } from "./useGameFeedback";
 
 const FRUIT_COUNT = 11;
-const RADII = [12, 16, 21, 27, 34, 43, 53, 65, 78, 93, 108];
 const SCORES = [1, 3, 6, 10, 15, 21, 28, 36, 45, 55, 66];
 const WORLD_LEFT = 9;
 const WORLD_RIGHT = 327;
@@ -13,7 +12,8 @@ const WORLD_FLOOR = 444;
 const DANGER_Y = 45;
 const SPAWN_PROTECTION_MS = 900;
 const MIN_DROP_INTERVAL_MS = 140;
-const DROP_RELEASE_Y = 96;
+const DROP_CLEARANCE_PADDING = 3;
+const DROP_CHANNEL_BOTTOM_Y = 124;
 const DROP_INITIAL_VELOCITY_Y = 3.2;
 const DROP_PROGRESS_EPSILON = 1;
 const DROP_CHANNEL_STALL_MS = 1400;
@@ -256,7 +256,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
           window.__ORCHARD_DIAGNOSTICS__ = {
             spawnMergePair: (level) => {
               const safeLevel = Phaser.Math.Clamp(Math.floor(level), 0, FRUIT_COUNT - 1);
-              const radius = RADII[safeLevel];
+              const radius = FRUIT_RADII[safeLevel];
               this.spawnFruit(168 - radius * 0.35, 235, safeLevel, false);
               this.spawnFruit(168 + radius * 0.35, 235, safeLevel, false);
             },
@@ -312,12 +312,12 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
       }
 
       clampX(level: number, x: number) {
-        const visualRadius = RADII[level];
+        const visualRadius = FRUIT_RADII[level];
         return Phaser.Math.Clamp(x, WORLD_LEFT + visualRadius + 2, WORLD_RIGHT - visualRadius - 2);
       }
 
       spawnFruit(x: number, y: number, level: number, pop: boolean, velocityX = 0, velocityY = 0) {
-        const diameter = RADII[level] * 2;
+        const diameter = FRUIT_RADII[level] * 2;
         const physicsOptions: PhaserTypes.Types.Physics.Matter.MatterBodyConfig = {
           restitution: 0.08,
           friction: 0.018,
@@ -327,12 +327,12 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
           slop: 0.02,
         };
         const safeX = this.clampX(level, x);
-        const safeY = Phaser.Math.Clamp(y, RADII[level], WORLD_FLOOR - RADII[level]);
+        const safeY = Phaser.Math.Clamp(y, FRUIT_RADII[level], WORLD_FLOOR - FRUIT_RADII[level]);
         const fruit = this.matter.add.image(safeX, safeY, `fruit-${level}`);
         // 必须先缩放贴图、再创建圆形 body；反过来会把碰撞圆再次按贴图缩放率缩小。
         fruit.setDisplaySize(diameter, diameter);
         fruit
-          .setCircle(RADII[level] * 0.91, physicsOptions)
+          .setCircle(FRUIT_RADII[level] * FRUIT_PHYSICS_SCALE, physicsOptions)
           .setData("level", level)
           .setData("bornAt", this.time.now)
           .setVelocity(velocityX * 0.35, velocityY * 0.35)
@@ -429,7 +429,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
           } else {
             const resultLevel = level + 1;
             const mergedFruit = this.spawnFruit(merge.x, merge.y, resultLevel, true, velocityX, velocityY);
-            if (merge.y < DROP_RELEASE_Y) {
+            if (merge.y < DROP_CHANNEL_BOTTOM_Y) {
               // 顶部合成结果必须继续向下离开投放通道，不能停在生成点与下一颗重叠。
               mergedFruit.setVelocityY(Math.max(mergedFruit.body?.velocity.y ?? 0, DROP_INITIAL_VELOCITY_Y));
             }
@@ -480,7 +480,7 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         this.input.enabled = true;
         this.time.paused = false;
         this.tweens.paused = false;
-        const droppedFruit = this.spawnFruit(this.clampX(currentLevel, currentX), 36, currentLevel, false);
+        const droppedFruit = this.spawnFruit(this.clampX(currentLevel, currentX), getDropSpawnY(currentLevel), currentLevel, false);
         // 主动给投放水果一个稳定的离手速度，使其快速通过顶部通道；这比缩短刚体锁更安全，
         // 因为下一颗生成时上一颗已经真实离开，不会在 Safari 中产生重叠刚体风暴。
         droppedFruit.setVelocityY(DROP_INITIAL_VELOCITY_Y);
@@ -505,7 +505,9 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         let dropChannelBlocked = false;
         if (activeDropBodyId !== null) {
           const activeBody = this.matter.world.getAllBodies().find((body) => body.id === activeDropBodyId);
-          if (!activeBody || activeBody.position.y >= DROP_RELEASE_Y) {
+          const nextSpawnBottom = getDropSpawnY(currentLevel) + FRUIT_RADII[currentLevel] * FRUIT_PHYSICS_SCALE;
+          // 下一颗按自身尺寸预留生成空间；尺寸调大后仍只锁住顶部短通道，不必等前一颗落地。
+          if (!activeBody || activeBody.bounds.min.y >= nextSpawnBottom + DROP_CLEARANCE_PADDING) {
             activeDropBodyId = null;
           } else if (activeBody.position.y >= activeDropLastY + DROP_PROGRESS_EPSILON) {
             activeDropLastY = activeBody.position.y;

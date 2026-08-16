@@ -1,6 +1,15 @@
 export const COMBO_WINDOW_MS = 1400;
 export const MAX_COMBO_MULTIPLIER = 5;
 
+// 前中期水果适度放大以缩短无效铺场时间；后期尺寸收敛，避免最高级水果挤满横向空间。
+export const FRUIT_RADII = [17, 22, 28, 33, 41, 50, 60, 71, 83, 95, 108] as const;
+export const FRUIT_PHYSICS_SCALE = 0.91;
+export const DROP_SPAWN_Y = 36;
+
+export function getDropSpawnY(level: number) {
+  return Math.max(DROP_SPAWN_Y, FRUIT_RADII[level]);
+}
+
 export type DifficultyProfile = {
   dropCooldownMs: number;
   overflowGraceMs: number;

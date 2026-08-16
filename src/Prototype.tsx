@@ -4,6 +4,7 @@ import { applyImageFallback, fruitAsset, gameAsset, localFruitAsset, localGameAs
 import { clearPlayerRecord, loadBestScore, loadGameSettings, saveBestScore, saveGameSettings, TUTORIAL_SEEN_KEY } from "./gameStorage";
 import { loadPlayerProgress, savePlayerProgress, unlockAchievements, type Achievement, type PlayerProgress } from "./playerProgress";
 import { OrchardGame, type ComboState } from "./OrchardGame";
+import { FRUIT_RADII, getDropSpawnY } from "./gameRules";
 import { SettingsScreen } from "./SettingsScreen";
 import { useGameFeedback } from "./useGameFeedback";
 import "./prototype.css";
@@ -213,6 +214,10 @@ export default function Prototype() {
     setRunId((value) => value + 1);
   };
 
+  const hangingRadiusX = FRUIT_RADII[current] * (329 / 336);
+  const hangingRadiusY = FRUIT_RADII[current] * (464 / 474);
+  const hangingCenterY = 17 + getDropSpawnY(current) * (464 / 474);
+
   return (
     <div className="orchard-viewport" data-testid="orchard-viewport">
       <img className="orchard-viewport-bg" src={gameAsset("background")} onError={fallbackToGameAsset("background")} alt="" />
@@ -261,7 +266,12 @@ export default function Prototype() {
           <img
             className="hanging-fruit"
             data-testid="current-fruit"
-            style={{ "--aim-left": `${19 + aimX * (329 / 336) - 22}px` } as CSSProperties}
+            style={{
+              "--aim-left": `${19 + aimX * (329 / 336) - hangingRadiusX}px`,
+              "--hanging-top": `${hangingCenterY - hangingRadiusY}px`,
+              "--hanging-width": `${hangingRadiusX * 2}px`,
+              "--hanging-height": `${hangingRadiusY * 2}px`,
+            } as CSSProperties}
             src={fruitAsset(current)}
             onError={fallbackToFruitAsset(current)}
             alt="当前水果"
