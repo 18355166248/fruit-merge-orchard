@@ -246,6 +246,21 @@ test("暂停、恢复和声音状态可交互", async ({ page }) => {
   await expect(page.getByRole("button", { name: "开启声音" })).toBeVisible();
 });
 
+test("图鉴通过分类 Tab 展示完整水果合成链并恢复游戏状态", async ({ page }) => {
+  await page.getByRole("button", { name: "打开堆叠图鉴" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "游戏图鉴" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("tab", { name: "水果" })).toHaveAttribute("aria-selected", "true");
+  await expect(dialog.getByRole("tabpanel")).toContainText("果园合成链");
+  await expect(dialog.locator(".collection-item")).toHaveCount(11);
+  await expect(dialog.getByText("金果王", { exact: true })).toBeVisible();
+
+  await dialog.getByRole("button", { name: "关闭游戏图鉴" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.locator(".pause-overlay")).toBeHidden();
+});
+
 test("最高分会从本地记录恢复", async ({ page }) => {
   await page.evaluate(() => {
     localStorage.removeItem("fruit-merge-orchard:best:v2");
@@ -386,20 +401,22 @@ test("iPhone 与 Pixel 下 HUD 均保持在屏幕内且互不遮挡", async ({ p
     const best = page.locator(".best-card");
     const next = page.locator(".next-card");
     const career = page.locator(".career-control");
+    const collection = page.locator(".collection-control");
     const settings = page.locator(".settings-control");
     const sound = page.locator(".sound-control");
     const pause = page.locator(".pause-control");
-    const [screenBox, scoreBox, bestBox, nextBox, careerBox, settingsBox, soundBox, pauseBox] = await Promise.all([
+    const [screenBox, scoreBox, bestBox, nextBox, careerBox, collectionBox, settingsBox, soundBox, pauseBox] = await Promise.all([
       screen.boundingBox(),
       score.boundingBox(),
       best.boundingBox(),
       next.boundingBox(),
       career.boundingBox(),
+      collection.boundingBox(),
       settings.boundingBox(),
       sound.boundingBox(),
       pause.boundingBox(),
     ]);
-    if (!screenBox || !scoreBox || !bestBox || !nextBox || !careerBox || !settingsBox || !soundBox || !pauseBox) throw new Error("HUD 布局不可测量");
+    if (!screenBox || !scoreBox || !bestBox || !nextBox || !careerBox || !collectionBox || !settingsBox || !soundBox || !pauseBox) throw new Error("HUD 布局不可测量");
 
     for (const box of [scoreBox, bestBox, nextBox]) {
       expect(box.x).toBeGreaterThanOrEqual(screenBox.x);
@@ -407,6 +424,8 @@ test("iPhone 与 Pixel 下 HUD 均保持在屏幕内且互不遮挡", async ({ p
     }
     expect(await overlaps(score, next)).toBe(false);
     expect(await overlaps(best, next)).toBe(false);
+    expect(await overlaps(career, collection)).toBe(false);
+    expect(await overlaps(collection, settings)).toBe(false);
     expect(scoreBox.y - (careerBox.y + careerBox.height)).toBeGreaterThanOrEqual(8);
     expect(nextBox.y - (settingsBox.y + settingsBox.height)).toBeGreaterThanOrEqual(8);
     expect(settingsBox.y - Math.max(soundBox.y + soundBox.height, pauseBox.y + pauseBox.height)).toBeGreaterThanOrEqual(8);

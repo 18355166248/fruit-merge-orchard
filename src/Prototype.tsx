@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type SyntheticEvent } from "react";
 import { CareerScreen } from "./CareerScreen";
+import { CollectionScreen } from "./CollectionScreen";
 import { applyImageFallback, fruitAsset, gameAsset, localFruitAsset, localGameAsset, type GameAssetKey } from "./gameAssets";
 import { clearPlayerRecord, loadBestScore, loadGameSettings, saveBestScore, saveGameSettings, TUTORIAL_SEEN_KEY } from "./gameStorage";
 import { loadPlayerProgress, savePlayerProgress, unlockAchievements, type Achievement, type PlayerProgress } from "./playerProgress";
@@ -69,6 +70,7 @@ export default function Prototype() {
   const [tutorialStep, setTutorialStep] = useState<TutorialStep>(loadTutorialStep);
   const [progress, setProgress] = useState<PlayerProgress>(loadPlayerProgress);
   const [careerOpen, setCareerOpen] = useState(false);
+  const [collectionOpen, setCollectionOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [newAchievement, setNewAchievement] = useState<Achievement | null>(null);
   const [engineReady, setEngineReady] = useState(false);
@@ -170,6 +172,17 @@ export default function Prototype() {
     if (gameOverScore === null) setPaused(pausedBeforePanelRef.current);
   }, [gameOverScore]);
 
+  const openCollection = () => {
+    pausedBeforePanelRef.current = paused;
+    setPaused(true);
+    setCollectionOpen(true);
+  };
+
+  const closeCollection = useCallback(() => {
+    setCollectionOpen(false);
+    if (gameOverScore === null) setPaused(pausedBeforePanelRef.current);
+  }, [gameOverScore]);
+
   const openSettings = () => {
     pausedBeforePanelRef.current = paused;
     setPaused(true);
@@ -238,6 +251,7 @@ export default function Prototype() {
           <img src={gameAsset("pause")} onError={fallbackToGameAsset("pause")} alt="" />
         </button>
         <button className="career-control" onClick={openCareer} aria-label="查看生涯与成就">生涯</button>
+        <button className="collection-control" onClick={openCollection} aria-label="打开堆叠图鉴">图鉴</button>
         <button className="settings-control" onClick={openSettings} aria-label="打开游戏设置">设置</button>
 
         <section className="hud-card score-card" aria-label={`得分 ${score}`}>
@@ -318,6 +332,7 @@ export default function Prototype() {
           {gameOverScore !== null ? `本局结束，得分 ${gameOverScore}` : danger ? "水果接近危险线" : combo.count > 1 ? `${combo.count} 连击，${combo.multiplier} 倍得分` : `当前得分 ${score}`}
         </p>
         {careerOpen && <CareerScreen progress={progress} onClose={closeCareer} />}
+        {collectionOpen && <CollectionScreen onClose={closeCollection} />}
         {settingsOpen && (
           <SettingsScreen
             settings={settings}
