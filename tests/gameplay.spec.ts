@@ -85,6 +85,25 @@ test("连续投放会缓冲一颗且无需等待水果落地", async ({ page }) 
   ).toBe(2);
 });
 
+test("Safari 持续连点时顶部投放区不会无限创建水果", async ({ page }) => {
+  const canvas = page.locator(".physics-canvas canvas");
+  await expect.poll(() => page.evaluate(() => Boolean(window.__ORCHARD_DIAGNOSTICS__))).toBe(true);
+
+  await canvas.evaluate(async (element) => {
+    const rect = element.getBoundingClientRect();
+    for (let index = 0; index < 30; index += 1) {
+      const clientX = rect.left + 80 + (index % 6) * 35;
+      const pointerId = 300 + index;
+      element.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId, isPrimary: true, button: 0, clientX, clientY: rect.top + 80 }));
+      document.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId, isPrimary: true, button: 0, clientX, clientY: rect.top + 80 }));
+      await new Promise((resolve) => window.setTimeout(resolve, 130));
+    }
+  });
+
+  // 不等待落地，只等待上一颗离开顶部通道；旧逻辑会在同样时间内创建约 30 个刚体。
+  expect(await page.evaluate(() => window.__ORCHARD_DIAGNOSTICS__?.snapshot().bodyCount)).toBeLessThan(18);
+});
+
 test("Safari 丢失动画循环后看门狗会自动恢复", async ({ page }) => {
   await expect.poll(() => page.evaluate(() => Boolean(window.__ORCHARD_DIAGNOSTICS__))).toBe(true);
   await page.evaluate(() => window.__ORCHARD_DIAGNOSTICS__?.stopRuntimeLoop());

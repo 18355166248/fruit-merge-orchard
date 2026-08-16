@@ -13,6 +13,9 @@ const WORLD_FLOOR = 444;
 const DANGER_Y = 45;
 const SPAWN_PROTECTION_MS = 900;
 const MIN_DROP_INTERVAL_MS = 140;
+const DROP_RELEASE_Y = 96;
+const DROP_INITIAL_VELOCITY_Y = 3.2;
+const DROP_CHANNEL_MAX_MS = 360;
 const LOOP_STALL_THRESHOLD_MS = 1500;
 const MAX_CLEAR_SCORE = 150;
 
@@ -104,6 +107,8 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
     let lastMergeAt = Number.NEGATIVE_INFINITY;
     let comboResetEvent: PhaserTypes.Time.TimerEvent | null = null;
     let activeDropGesture = false;
+    let activeDropBodyId: number | null = null;
+    let activeDropStartedAt = 0;
     let lastDropAt = Number.NEGATIVE_INFINITY;
     let dropQueued = false;
     let lastSceneHeartbeatAt = window.performance.now();
@@ -438,8 +443,9 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
       dropFruit() {
         if (isGameOver) return;
         const dropAt = window.performance.now();
-        // 高频点击只缓冲一颗而不直接丢弃，既保持跟手感，也避免输入无限堆积压垮移动端物理计算。
-        if (dropAt - lastDropAt < MIN_DROP_INTERVAL_MS) {
+        // 当前水果离开顶部投放区后即可释放下一颗，无需等它落地；同一区域只保留一个刚体，
+        // 避免 Safari 连点时反复复用视觉上的“当前水果”并把物理世界瞬间塞满。
+        if (activeDropBodyId !== null || dropAt - lastDropAt < MIN_DROP_INTERVAL_MS) {
           dropQueued = true;
           return;
         }
@@ -452,7 +458,12 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
         this.input.enabled = true;
         this.time.paused = false;
         this.tweens.paused = false;
-        this.spawnFruit(this.clampX(currentLevel, currentX), 36, currentLevel, false);
+        const droppedFruit = this.spawnFruit(this.clampX(currentLevel, currentX), 36, currentLevel, false);
+        // 主动给投放水果一个稳定的离手速度，使其快速通过顶部通道；这比缩短刚体锁更安全，
+        // 因为下一颗生成时上一颗已经真实离开，不会在 Safari 中产生重叠刚体风暴。
+        droppedFruit.setVelocityY(DROP_INITIAL_VELOCITY_Y);
+        activeDropBodyId = this.matter.world.getAllBodies().find((body) => body.gameObject === droppedFruit)?.id ?? null;
+        activeDropStartedAt = window.performance.now();
         onFeedback("drop", currentLevel);
         onPlayerDrop();
         currentLevel = nextLevel;
@@ -467,8 +478,16 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
       update() {
         if (isGameOver) return;
         lastSceneHeartbeatAt = window.performance.now();
-        if (dropQueued && lastSceneHeartbeatAt - lastDropAt >= MIN_DROP_INTERVAL_MS) this.dropFruit();
         const now = this.time.now;
+        if (activeDropBodyId !== null) {
+          const activeBody = this.matter.world.getAllBodies().find((body) => body.id === activeDropBodyId);
+          if (!activeBody || activeBody.position.y >= DROP_RELEASE_Y || lastSceneHeartbeatAt - activeDropStartedAt >= DROP_CHANNEL_MAX_MS) {
+            // 使用单调墙钟避免 Safari 降低游戏时间步长后拖慢投放；这里只在 update 帧中执行，
+            // 因此 RAF 真停时仍不会继续灌入刚体。
+            activeDropBodyId = null;
+          }
+        }
+        if (dropQueued && activeDropBodyId === null && lastSceneHeartbeatAt - lastDropAt >= MIN_DROP_INTERVAL_MS) this.dropFruit();
         let highestProgress = 0;
         const liveIds = new Set<number>();
 
@@ -478,9 +497,9 @@ export function OrchardGame({ onScore, onNext, onCurrent, onAim, onDanger, onGam
           liveIds.add(body.id);
           const bornAt = (fruit.getData("bornAt") as number | undefined) ?? now;
           const isProtected = now - bornAt < SPAWN_PROTECTION_MS;
-          const isSettledAboveLine = body.bounds.min.y <= DANGER_Y && body.speed < 0.16;
+          const isAboveLine = body.bounds.min.y <= DANGER_Y;
 
-          if (isProtected || !isSettledAboveLine || merging.has(body.id)) {
+          if (isProtected || !isAboveLine || merging.has(body.id)) {
             overflowSince.delete(body.id);
             return;
           }
